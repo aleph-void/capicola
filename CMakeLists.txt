@@ -92,6 +92,12 @@ set(ALCHEMY_FW_SOURCES
     src/main.cpp
     src/audio/audio_engine.cpp)
 
+# The interactive manual rides the HostLink descriptor, which the bench image
+# trades away for the serial log — so it only joins the deploy builds.
+if(NOT CAPICOLA_BENCH_LOG)
+    list(APPEND ALCHEMY_FW_SOURCES src/capicola_manual.cpp)
+endif()
+
 # Board BSP — transitively pulls in alchemy::primitives (LedPanel, anims) and
 # the `daisy` library.  alchemy::surface provides the UI layer: ControlLoop,
 # Pager (pot-catch + pages), VirtualKnob, CvMatrix — composed in src/main.cpp.
@@ -153,4 +159,53 @@ option(CAPICOLA_BENCH_LOG
        "1 Hz CPU/CV serial log on the front USB (replaces HostLink)" OFF)
 if(CAPICOLA_BENCH_LOG)
     target_compile_definitions(capicola PRIVATE CAPICOLA_BENCH_LOG)
+endif()
+
+# ── capicola-flash-live — flash without touching the module ─────────────────
+# The stock `capicola-flash` needs the module already in DFU (hold B3 through
+# the boot window).  This one asks the RUNNING firmware to reboot into the
+# system bootloader over the same USB the web programmer uses, then flashes
+# it: dfu-util's -w waits for the DFU device to enumerate after the reset.
+#
+# Requires node for the SDK's hostlink CLI, and a module running HostLink —
+# i.e. NOT a CAPICOLA_BENCH_LOG image, which gives that port to the serial
+# log.  Fall back to `capicola-flash` in either case.
+find_program(_CAPICOLA_NODE NAMES node nodejs)
+set(_capicola_hostlink
+    "${ALCHEMY_SDK_DIR}/tools/hostlink-cli/hostlink.mjs")
+
+if(_ALCHEMY_DFU_UTIL AND _CAPICOLA_NODE AND NOT CAPICOLA_BENCH_LOG)
+    add_custom_target(capicola-flash-live
+        COMMAND "${_CAPICOLA_NODE}" "${_capicola_hostlink}" reboot bootloader
+        # dfu-util's -w returns the instant the device enumerates, which on
+        # Linux is before the kernel is done with it -- claiming the interface
+        # then fails LIBUSB_ERROR_BUSY.  Let enumeration settle first.
+        COMMAND ${CMAKE_COMMAND} -E sleep 2
+        COMMAND "${_ALCHEMY_DFU_UTIL}"
+                -w
+                -a 0
+                -s 0x90040000:leave
+                -D $<TARGET_FILE_DIR:capicola>/capicola.bin
+                -d ,0483:df11
+        DEPENDS capicola
+        USES_TERMINAL
+        COMMENT "Rebooting the running module into DFU, then flashing"
+        VERBATIM)
+else()
+    if(CAPICOLA_BENCH_LOG)
+        set(_capicola_live_why
+            "the bench image has no HostLink -- use capicola-flash")
+    elseif(NOT _CAPICOLA_NODE)
+        set(_capicola_live_why
+            "node not found (apt install nodejs) -- use capicola-flash")
+    else()
+        set(_capicola_live_why
+            "dfu-util not found (apt install dfu-util)")
+    endif()
+    add_custom_target(capicola-flash-live
+        COMMAND ${CMAKE_COMMAND} -E echo
+                "ERROR: ${_capicola_live_why}"
+        COMMAND ${CMAKE_COMMAND} -E false
+        COMMENT "capicola-flash-live unavailable"
+        VERBATIM)
 endif()

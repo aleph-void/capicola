@@ -286,12 +286,15 @@ static void test_detector()
     static Detector det;
     det.Init(kFs);
 
-    /* Ten 3-sample bursts over a -60 dB noise floor, 0.1 s apart. */
+    /* Ten 3-sample bursts over a -60 dB noise floor, 0.2 s apart — wider
+     * than kMinGapSec, so the hold-off never suppresses one and this stays a
+     * test of detection rather than of density. */
     rng_reset(1234u);
-    const int kBursts = 10;
-    for (int i = 0; i < 48000; i++) {
+    const int kBursts  = 10;
+    const int kSpacing = 9600;   // 0.2 s @ 48 kHz
+    for (int i = 0; i < kBursts * kSpacing; i++) {
         float x = 0.001f * frand2();
-        if (i % 4800 < 3 && i < kBursts * 4800) x += 1.0f;
+        if (i % kSpacing < 3) x += 1.0f;
         det.Analyze(x);
     }
     std::printf("   bursts: %d, kept events: %u, total events: %u\n",
@@ -304,10 +307,30 @@ static void test_detector()
          i <= det.events.GetLatestIndex(); i++) {
         if (!det.EventKept(i)) continue;
         const double t   = det.events.GetSample(i)->time;   // seconds
-        const double k   = std::round(t / 0.1);
-        if (std::fabs(t - 0.1 * k) > 0.005) misplaced++;
+        const double k   = std::round(t / 0.2);
+        if (std::fabs(t - 0.2 * k) > 0.005) misplaced++;
     }
     CHECK(misplaced == 0);
+
+    /* Hold-off: the same bursts packed closer than kMinGapSec are thinned,
+     * and never by more than the hold-off allows. Spacing 0.05 s against a
+     * 0.15 s hold-off should keep roughly every third burst. */
+    static Detector dense;
+    dense.Init(kFs);
+    rng_reset(1234u);
+    const int kTight = 2400;     // 0.05 s @ 48 kHz
+    for (int i = 0; i < 30 * kTight; i++) {
+        float x = 0.001f * frand2();
+        if (i % kTight < 3) x += 1.0f;
+        dense.Analyze(x);
+    }
+    const double span    = 30.0 * (double)kTight / (double)kFs;
+    const uint32_t ceil_ = (uint32_t)(span / Detector::kMinGapSec) + 1u;
+    std::printf("   hold-off: %u kept of %u bursts over %.2f s (ceiling %u)\n",
+                dense.Count(), 30u, span, ceil_);
+    CHECK(dense.Count() <= ceil_);
+    CHECK(dense.Count() >= 6);          /* thinned, not silenced */
+    CHECK(dense.TotalCount() > dense.Count());
 
     /* Silence stores nothing (kAbsFloor), and the mute sentinel keeps
      * events but never fires. */

@@ -55,7 +55,7 @@ class AudioEngine
     /* ── Follower IO signals (input chain + output chain) ────────────────────
      * The OUTPUT follower is a second Detector on the final (post-mix) mono sum;
      * it shares threshold/smoothing with the input followers but never punches —
-     * auto-splice fires only from the input side. Gates are the LIVE kept-event
+     * auto-slice fires only from the input side. Gates are the LIVE kept-event
      * monostables (~20 ms, retriggerable). EnvNorm* is the envelope expanded to
      * 0..1 (sqrt of gained value). */
     bool  InGate()     const { return inGate; }        // L or R input follower gate

@@ -19,8 +19,8 @@ namespace capicola {
 // smoothed envelope STREAM (kAvgSec), not of the peak events. The stream
 // average is time-indexed — silence pulls it down — so an isolated hit after a
 // gap towers over the reference and passes. Event density is set upstream by
-// the smoothing cutoff (raw TKEO = dense bursts; lower cutoff merges peaks). No
-// hysteresis, no refractory: a peak picker is discrete, so nothing chatters.
+// the smoothing cutoff (raw TKEO = dense bursts; lower cutoff merges peaks) and
+// capped by kMinGapSec, a hold-off between kept events.
 class Detector {
   public:
     static constexpr int kMaxEvents = 2048;   // power of 2 (shared ring mask)
@@ -40,6 +40,8 @@ class Detector {
     uint32_t keptCount;    // monotonic count of KEPT events
     uint32_t totalCount;   // monotonic count of ALL stored events
     int      gateSamps;    // kept-event monostable countdown (gate/LED/CV)
+    int      gapSamps;     // hold-off countdown since the last kept event
+    int      minGapSamps;  // hold-off length (see kMinGapSec)
 
     // Trivially constructible on purpose (SDRAM-resident) — see Init().
     bool keptFlags[kMaxEvents];   // slaved to events' monotonic index (& mask)
@@ -61,6 +63,8 @@ class Detector {
         keptCount  = 0;
         totalCount = 0;
         gateSamps  = 0;
+        gapSamps   = 0;
+        minGapSamps = (int)(kMinGapSec * fs);
         prevNewer  = {};   // matches a lag-3 read of the freshly zeroed ring
         for (int i = 0; i < kMaxEvents; i++) keptFlags[i] = false;
     }
@@ -68,6 +72,7 @@ class Detector {
     void SetCutoff(float fc)     { cutoff = fc; svf.SetControls(cutoff, resonance); }
     void SetResonance(float r)   { resonance = r; svf.SetControls(cutoff, resonance); }
     void SetThreshold(float t)   { threshold = t; }
+    void SetMinEventGap(float s) { minGapSamps = (int)(s * fs); }
 
     float    Envelope()   const { return svf.GetLowpass(); }    // smoothed |TKEO|
     float    Average()    const { return avgLp.GetLowpass(); }  // threshold reference
@@ -86,6 +91,10 @@ class Detector {
     static constexpr float kAbsFloor  = 1e-5f;   // silence guard: sub-floor peaks aren't events
     static constexpr float kMuteAt    = 100.0f;  // threshold ≥ this = hard mute (UI sentinel)
     static constexpr float kGateSec   = 0.02f;   // kept-event gate width (CV gate outs + LEDs)
+    // Hold-off between kept events. Distinct from the recorder's crossfade
+    // floor: this thins the trigger stream itself, so gate/CV/LED and the
+    // slices they represent stay in step.
+    static constexpr float kMinGapSec = 0.15f;
 
     // Consume one sample; returns true iff a KEPT event was stored this sample.
     inline bool Analyze(float x) {
@@ -115,18 +124,21 @@ class Detector {
 
             if (value > kAbsFloor) {
                 const bool kept = (threshold < kMuteAt)
-                               && (value > threshold * avgLp.GetLowpass());
+                               && (value > threshold * avgLp.GetLowpass())
+                               && (gapSamps <= 0);
                 events.Write({value, clock - (double)lag / (double)fs});
                 keptFlags[events.GetLatestIndex() & (kMaxEvents - 1)] = kept;
                 totalCount++;
                 if (kept) {
                     keptCount++;
                     gateSamps = (int)(kGateSec * fs);
+                    gapSamps  = minGapSamps;
                     fired     = true;
                 }
             }
         }
         if (gateSamps > 0) gateSamps--;
+        if (gapSamps  > 0) gapSamps--;
         clock += 1.0 / fs;
         return fired;
     }

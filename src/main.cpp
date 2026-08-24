@@ -50,8 +50,11 @@
  * rendering (each knob's declarative Ring).
  */
 
+#include <cstring>
+
 #include "alchemy/control/pot_catch.h"       /* PotState, InitCatch, UpdateCatch */
 #include "alchemy/led/anims/fill.h"
+#include "alchemy/host_link/component_writer.h"
 #include "alchemy/host_link/host.h"
 #include "alchemy/hw/alchemy_lab_v2.h"
 #include "alchemy/surface/control_loop.h"
@@ -151,11 +154,14 @@ static ModRouter modRouter;
 
 /* ── Page 0 — performance knobs ──────────────────────────────────────── */
 
-static VirtualKnob pitch = VirtualKnob(0, "Pitch")
+VirtualKnob pitch = VirtualKnob(0, "Pitch")
+    .Ident("perf.pitch")
+    .Unit("st")
     .Linear(-12.f, +12.f)
     .Ring(Bipolar(kOrange, kBlue, kCenter));   // up = orange (page hue), down = blue
 
-static VirtualKnob stretch = VirtualKnob(1, "Stretch")
+VirtualKnob stretch = VirtualKnob(1, "Stretch")
+    .Ident("perf.stretch")
     .Linear(0.0f, 1.0f)
     .Ring(Level(kOrange));
 
@@ -168,19 +174,26 @@ static float StretchCurve(float n)
     return std::pow(1.0f - n, 2.5f);
 }
 
-static VirtualKnob threshold = VirtualKnob(2, "Threshold")
+VirtualKnob threshold = VirtualKnob(2, "Threshold")
+    .Ident("perf.threshold")
     .Linear(0.0f, 1.0f)
     .Ring(Level(kOrange));
 
-static VirtualKnob grainSize = VirtualKnob(3, "Grain Size")
+VirtualKnob grainSize = VirtualKnob(3, "Grain Size")
+    .Ident("perf.grain")
     .Linear(32.f, 4096.f)
     .Ring(Level(kOrange));
 
-static VirtualKnob quality = VirtualKnob(4, "Quality")
+VirtualKnob quality = VirtualKnob(4, "Quality")
+    .Ident("perf.quality")
     .Linear(0.1f, 0.001f)   // analyzer ε — CW = max fidelity, CCW = crunchy
+    /* The host would otherwise render the raw epsilon as a backwards
+     * "0.1 .. 0.001" sweep; fidelity percent is what the knob means. */
+    .Disp("{\"kind\":\"norm\"}")
     .Ring(Level(kOrange));
 
-static VirtualKnob feedback = VirtualKnob(5, "Feedback")
+VirtualKnob feedback = VirtualKnob(5, "Feedback")
+    .Ident("perf.feedback")
     .Linear(0.f, 1.5f)
     .Ring(Level(kOrange, FillAnim::Pulse));
 
@@ -201,17 +214,23 @@ static void DrawDepthGlow(LedPanel& panel, uint8_t pot, const ArcGeometry&,
     }
 }
 
-static VirtualKnob cvDepth1 = VirtualKnob(0, "P1 Depth")
+VirtualKnob cvDepth1 = VirtualKnob(0, "P1 Depth")
+    .Ident("depth.p1")
     .Linear(-1.f, +1.f).Ring(Bipolar(kPink, kOrange, kCenter)).Overdraw(DrawDepthGlow);
-static VirtualKnob cvDepth2 = VirtualKnob(1, "P2 Depth")
+VirtualKnob cvDepth2 = VirtualKnob(1, "P2 Depth")
+    .Ident("depth.p2")
     .Linear(-1.f, +1.f).Ring(Bipolar(kPink, kOrange, kCenter)).Overdraw(DrawDepthGlow);
-static VirtualKnob cvDepth3 = VirtualKnob(2, "P3 Depth")
+VirtualKnob cvDepth3 = VirtualKnob(2, "P3 Depth")
+    .Ident("depth.p3")
     .Linear(-1.f, +1.f).Ring(Bipolar(kPink, kOrange, kCenter)).Overdraw(DrawDepthGlow);
-static VirtualKnob cvDepth4 = VirtualKnob(3, "P4 Depth")
+VirtualKnob cvDepth4 = VirtualKnob(3, "P4 Depth")
+    .Ident("depth.p4")
     .Linear(-1.f, +1.f).Ring(Bipolar(kPink, kOrange, kCenter)).Overdraw(DrawDepthGlow);
-static VirtualKnob cvDepth5 = VirtualKnob(4, "P5 Depth")
+VirtualKnob cvDepth5 = VirtualKnob(4, "P5 Depth")
+    .Ident("depth.p5")
     .Linear(-1.f, +1.f).Ring(Bipolar(kPink, kOrange, kCenter)).Overdraw(DrawDepthGlow);
-static VirtualKnob cvDepth6 = VirtualKnob(5, "P6 Depth")
+VirtualKnob cvDepth6 = VirtualKnob(5, "P6 Depth")
+    .Ident("depth.p6")
     .Linear(-1.f, +1.f).Ring(Bipolar(kPink, kOrange, kCenter)).Overdraw(DrawDepthGlow);
 
 /* ── Mod routing view (B3 double-tap; not a pager page) ──────────────────
@@ -231,12 +250,22 @@ static int ZoneOf(float v)
     return (z > kNumSrcZones - 1) ? kNumSrcZones - 1 : (z < 0) ? 0 : z;
 }
 
+#ifndef CAPICOLA_BENCH_LOG
+/* Routing field identity and prose — defined in capicola_manual.cpp so every
+ * manual string lives in one file. */
+extern const char* const kRouteFieldId  [NUM_POTS];
+extern const char* const kRouteFieldName[NUM_POTS];
+extern const char* const kRouteFieldHelp[NUM_POTS];
+extern const VirtualKnob* const kRouteSeeKnob[NUM_POTS];
+extern const char* const kRouteDispJson;
+#endif
+
 /* Persisted zone per perf pot — rides the preset store as its own component
  * now that routing left the Pager. */
 class RoutingStore : public Serializable
 {
   public:
-    uint8_t zone[NUM_POTS] = {1, 1, 1, 1, 1, 1};   // 1 = output follower (factory default)
+    uint8_t zone[NUM_POTS] = {0, 0, 0, 0, 0, 0};   // 0 = input follower (factory default)
 
     size_t SerializedSize() const override { return NUM_POTS; }
     void   Serialize(uint8_t* out) const override
@@ -255,6 +284,28 @@ class RoutingStore : public Serializable
         return 0x43563034u ^ (uint32_t)NUM_POTS
                            ^ ((uint32_t)kNumSrcZones << 8);
     }
+
+#ifndef CAPICOLA_BENCH_LOG
+    /* Self-describe to HostLink so the routing page is editable and
+     * documented on the web programmer instead of an opaque blob. One byte
+     * per pot maps straight onto an enum field — no storage change, so the
+     * schema hash (and every saved preset) is untouched. Prose and labels
+     * live in capicola_manual.cpp with the rest of the manual. */
+    bool Describe(hostlink::ComponentWriter& w) const override
+    {
+        w.Ident("routing").Label("Mod Routing").Grid(1, NUM_POTS);
+        for (uint8_t p = 0; p < NUM_POTS; p++)
+        {
+            const SeeRef see[1] = {SeeRef(*kRouteSeeKnob[p])};
+            if (!w.Field(kRouteFieldId[p], kRouteFieldName[p], p,
+                         hostlink::FieldType::Enum, 0.0f /* in follower */,
+                         kRouteDispJson, kNumSrcZones, 0, (int16_t)p,
+                         kRouteFieldHelp[p], see, 1u))
+                return false;
+        }
+        return true;
+    }
+#endif
 };
 
 static RoutingStore routing;
@@ -285,9 +336,9 @@ static void DrawRouteRing(uint8_t pot, uint8_t sel)
     }
 }
 
-static Page perfPage  = Page(0).Knobs(pitch, stretch, threshold,
+Page perfPage  = Page(0).Name("Primary").Knobs(pitch, stretch, threshold,
                                       grainSize, quality, feedback);
-static Page depthPage = Page(1).Knobs(cvDepth1, cvDepth2, cvDepth3,
+Page depthPage = Page(1).Name("Depth").Knobs(cvDepth1, cvDepth2, cvDepth3,
                                       cvDepth4, cvDepth5, cvDepth6);
 
 /* ── Surfaces ────────────────────────────────────────────────────────── */
@@ -303,8 +354,12 @@ static Presets presets(hw.seed.qspi);
 #ifndef CAPICOLA_BENCH_LOG
 /* Browser/CLI preset editor over the front-panel USB CDC (SDK default
  * transport). Identity strings are literals — kept by reference. */
-static hostlink::Host host(presets, "capicola", "Capicola",
+hostlink::Host host(presets, "capicola", "Capicola",
                            "0.3.0", CAPICOLA_GIT_HASH);
+
+/* src/capicola_manual.cpp — attaches the firmware-authored manual (prose,
+ * jacks, buttons) to the descriptor. Called before BootLoad() brings USB up. */
+void DescribeManual(hostlink::Host& host);
 #endif
 
 static constexpr uint32_t kSaveHoldMs  = 1500;
@@ -314,8 +369,8 @@ static constexpr uint32_t kSaveBlinkMs  = 100;
 static uint32_t saveFlashMs = 0;   // 0 = never; set on save/reset commit
 
 /* Factory defaults (stored norms) — seeded at boot AND restored per-page by the
- * B1+B3 hold. One table so the two can never drift apart. (Routing defaults
- * are RoutingStore's zero-init: all input follower.) */
+ * B1+B3 hold. One table so the two can never drift apart. (Routing zones default
+ * to the input follower in RoutingStore's own initializer.) */
 static constexpr float kPageDefaults[2][NUM_POTS] = {
     /* perf: pitch unity, stretch ~6x, threshold mid, grain, quality max,
      * feedback off. */
@@ -377,36 +432,71 @@ static void SecApply(uint8_t pot, float v)
     }
 }
 
-/* Secondary norms ride the preset store. */
+#ifndef CAPICOLA_BENCH_LOG
+/* Secondary field identity and prose — defined in capicola_manual.cpp. */
+extern const char* const kSecFieldId  [NUM_POTS];
+extern const char* const kSecFieldName[NUM_POTS];
+extern const char* const kSecFieldHelp[NUM_POTS];
+extern const char* const kSecFieldDisp[NUM_POTS];
+#endif
+
+/* Secondary norms ride the preset store.
+ *
+ * Stored as pot-normalized f32 — the one type HostLink's descriptor can
+ * address (protocol §5: "f32" is a 4-byte LE float, natural range [0,1]).
+ * The earlier u16 packing halved the bytes but made the whole page opaque to
+ * the web programmer; twelve extra preset bytes buys six live, documented
+ * controls. */
 class SecondaryStore : public Serializable
 {
   public:
-    size_t SerializedSize() const override { return NUM_POTS * 2; }   // uint16 each
+    size_t SerializedSize() const override { return NUM_POTS * sizeof(float); }
     void   Serialize(uint8_t* out) const override
     {
         for (uint8_t p = 0; p < NUM_POTS; p++)
         {
             float n = secState[p].stored;
             if (n < 0.0f) n = 0.0f; else if (n > 1.0f) n = 1.0f;
-            const uint16_t q = (uint16_t)(n * 65535.0f + 0.5f);
-            out[p * 2]     = (uint8_t)(q & 0xFF);
-            out[p * 2 + 1] = (uint8_t)(q >> 8);
+            std::memcpy(out + p * sizeof(float), &n, sizeof(float));
         }
     }
     bool Deserialize(const uint8_t* in) override
     {
         for (uint8_t p = 0; p < NUM_POTS; p++)
         {
-            const uint16_t q = (uint16_t)in[p * 2]
-                             | (uint16_t)((uint16_t)in[p * 2 + 1] << 8);
-            secState[p].stored = (float)q / 65535.0f;
+            float n;
+            std::memcpy(&n, in + p * sizeof(float), sizeof(float));
+            /* Written by anyone on the wire — clamp, and let NaN fall to 0
+             * (the !(n >= 0) test catches it; n > 1 never fires on NaN). */
+            if (!(n >= 0.0f))     n = 0.0f;
+            else if (n > 1.0f)    n = 1.0f;
+            secState[p].stored = n;
         }
         return true;
     }
     uint32_t SchemaHash() const override
     {
-        return 0x53454335u ^ (uint32_t)NUM_POTS;
+        /* Bumped from ...35: the payload changed from u16 to f32. */
+        return 0x53454336u ^ (uint32_t)NUM_POTS;
     }
+
+#ifndef CAPICOLA_BENCH_LOG
+    /* Self-describe so the secondary page is editable and documented on the
+     * web programmer. OnFrame pushes any changed norm into the engine, so a
+     * live write from the host takes effect on the next frame. */
+    bool Describe(hostlink::ComponentWriter& w) const override
+    {
+        w.Ident("secondary").Label("Secondary").Grid(1, NUM_POTS);
+        for (uint8_t p = 0; p < NUM_POTS; p++)
+            if (!w.Field(kSecFieldId[p], kSecFieldName[p],
+                         p * (uint32_t)sizeof(float),
+                         hostlink::FieldType::F32, kSecDefault[p],
+                         kSecFieldDisp[p], 0u, 0, (int16_t)p,
+                         kSecFieldHelp[p]))
+                return false;
+        return true;
+    }
+#endif
 };
 
 static SecondaryStore secondary;
@@ -486,13 +576,19 @@ static void OnFrame()
         }
 
         if (SecondaryOpen())
-        {
             for (uint8_t p = 0; p < NUM_POTS; p++)
-            {
-                if (!kSecEnabled[p]) continue;
-                UpdateCatch(secState[p], ph[p]);
-                SecApply(p, SecValue(p, secState[p].stored));
-            }
+                if (kSecEnabled[p]) UpdateCatch(secState[p], ph[p]);
+
+        /* Push every changed secondary, whoever moved it — a caught pot, a
+         * preset load, the B1+B3 reset, or a HostLink live write. Gating this
+         * on SecondaryOpen() used to strand anything the panel didn't move.
+         * Seeded out of range so the first frame always pushes. */
+        static float applied[NUM_POTS] = {-1.f, -1.f, -1.f, -1.f, -1.f, -1.f};
+        for (uint8_t p = 0; p < NUM_POTS; p++)
+        {
+            if (!kSecEnabled[p] || secState[p].stored == applied[p]) continue;
+            applied[p] = secState[p].stored;
+            SecApply(p, SecValue(p, secState[p].stored));
         }
 
         prevActive = b3Active;
@@ -609,7 +705,7 @@ static void OnPoll(uint32_t t_ms)
             {
                 for (uint8_t p = 0; p < NUM_POTS; p++)
                 {
-                    routing.zone[p] = 1;       // output follower
+                    routing.zone[p] = 0;       // input follower
                     routeCaught[p]  = false;   // re-catch against the new zone
                 }
             }
@@ -818,6 +914,7 @@ int main(void) {
         .OnPoll(OnPoll)
         .OnRender(OnRender);
 #ifndef CAPICOLA_BENCH_LOG
+    DescribeManual(host);
     loop.Use(host);   /* descriptor + USB come up inside BootLoad() */
 #endif
 
