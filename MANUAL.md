@@ -78,11 +78,11 @@ deliberately unstable** (chaos zone), with a hard ±1 clamp on the injection as
 the runaway guard. The feedback tap sits *before* the mix blend, so turning mix
 down doesn't starve the loop.
 
-**6-o'clock pips** (always on, every page): a live mirror of the six jacks.
-P1/P2 show the two inputs (TRIG IN, CV IN) in bipolar colors — green positive,
-red negative. P3–P6 mirror the four outputs — in-gate (P3, also lights on a B2
-press), out-gate (P4), in-envelope (P5, turns red when the input clips),
-out-envelope (P6).
+**6-o'clock pips** (always on, every page): a live mirror of the four output
+jacks — TRIG 1 (P3), TRIG 2 (P4), in-envelope (P5, turns red when the input
+clips), out-envelope (P6). The two trig pips run off the same events as the
+jacks, held 60 ms so a 10 ms pulse is visible at a glance; P3 therefore lights
+on a B2 press or a TRIG IN edge exactly as the jack does.
 
 ---
 
@@ -168,15 +168,19 @@ unity pitch. Full wet is the classic Capicola behavior.
 
 | | Left | | | | Right |
 |---|---|---|---|---|---|
-| top | **IN L** | **TRIG IN** | **TRIG 1** out — in-gate | **TRIG 2** out — out-gate | **OUT L** |
+| top | **IN L** | **TRIG IN** | **TRIG 1** out — slice | **TRIG 2** out — out-transient | **OUT L** |
 | bottom | **IN R** | **CV IN** | **ENV 1** out — in-env | **ENV 2** out — out-env | **OUT R** |
 
 - **TRIG IN:** external slice trigger — rising edge (fires ~+2 V, re-arms
   ~+1 V), always accepted, even at threshold mute. Shares B2's dark flash.
 - **CV IN:** the external mod source, eurorack bipolar, routable to any knob
   via the routing page.
-- **Trig outs:** 0/5 V kept-event monostables, ~20 ms, retriggerable — these
-  fire on *kept* transients, i.e. exactly what splices the engine (input side).
+- **Trig outs:** 0/5 V pulses, 10 ms, one per event. **TRIG 1** fires on every
+  splice the engine actually takes — auto-detected transients, B2 presses and
+  TRIG IN alike. **TRIG 2** fires on the output follower's kept transients.
+  Neither can pulse faster than the detector's 150 ms hold-off, and a long fade
+  thins TRIG 1 further (the fade is the retrigger floor), so the jack always
+  reports what the engine did rather than what the detector saw.
 - **Env outs:** the follower envelopes, 0–5 V — the same signals available
   internally as mod sources, mirrored on the P5/P6 pips.
 

@@ -246,9 +246,12 @@ void AttachManualHelp()
     cv_in.Help("External modulation source, routable to any Primary knob "
                "from the Routing page. The only bipolar source of the "
                "three.");
-    trig_1.Help("Triggers a slice, same as pressing the slice button.")
-        .SeeAlso(threshold);
-    trig_2.Help("Gate on the output follower's transients.");
+    trig_1.Help("A 10 ms pulse on every slice the engine takes — detected "
+                "transients, B2 presses and TRIG IN edges alike. Never faster "
+                "than the 150 ms hold-off, and a long fade thins it further.")
+        .SeeAlso(threshold, b2);
+    trig_2.Help("A 10 ms pulse on each of the output follower's kept "
+                "transients. Same 150 ms hold-off; never splices anything.");
     env_1.Help("Input follower envelope, mirrored on the P5 pip.");
     env_2.Help("Output follower envelope, mirrored on the P6 pip.");
     out_l.Help("Left output, post-mix.");

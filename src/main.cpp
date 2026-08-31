@@ -38,12 +38,13 @@
  * dark blink.
  *
  * Panel jacks (2×5, panel-final names, code indices in parens):
- *   INL   TRIG IN (cv[0])   TRIG 1·in-gate (jacks[2])   TRIG 2·out-gate (jacks[4])   OUTL
+ *   INL   TRIG IN (cv[0])   TRIG 1·slice (jacks[2])   TRIG 2·out-event (jacks[4])   OUTL
  *   INR   CV IN   (cv[1])   ENV 1·in-env   (jacks[3])   ENV 2·out-env   (jacks[5])   OUTR
  * TRIG IN = external slice trigger (rising edge, always accepted). CV IN = the
- * single external mod CV (eurorack-bipolar). Trig outs are kept-event
- * monostables (~20 ms), 0/5 V; envelopes are 0..1 → 0..5 V. Same physical
- * channels as the old CV1..CV6 map — only the roles/names changed.
+ * single external mod CV (eurorack-bipolar). Trig outs are 10 ms 0/5 V pulses,
+ * one per event, never closer than the detector's 150 ms hold-off; envelopes
+ * are 0..1 → 0..5 V. Same physical channels as the old CV1..CV6 map — only the
+ * roles/names changed.
  *
  * Fade (= latency = retrigger floor) is the secondary page's P2, boot 20 ms.
  * The SDK's ControlLoop owns polling, pot-catch (Pager), CV dispatch, and ring
@@ -103,8 +104,66 @@ static constexpr LedPanel::Rgb kB3PageButton[2] = {
 };
 
 /* CV out levels. */
-static constexpr float kGateVolts   = 5.0f;
+static constexpr float kTrigVolts   = 5.0f;
 static constexpr float kEnvOutVolts = 5.0f;
+
+/* Trigger outs. The jack gets a standard Eurorack trigger; the pip is held
+ * longer so a hit always survives a 16 ms render frame. Both come off the same
+ * edge, so the panel and the jack can never disagree about what fired. */
+static constexpr uint32_t kTrigPulseMs = 10;
+static constexpr uint32_t kTrigLedMs   = 60;
+
+/* One trigger out + its 6pm pip. Fires either from a monotonic engine event
+ * counter (Follow) or from a control-side event (Fire, for the forced slices).
+ * A pulse is never retriggered while it is high: L and R punch off their own
+ * detectors, so one stereo hit can straddle two audio blocks, and the second
+ * edge belongs to the pulse already running rather than to a runt second
+ * trigger. Consecutive events on one counter are >= 150 ms apart (the
+ * detector's hold-off), so nothing musical is lost to that rule. */
+class TrigOut
+{
+  public:
+    /* Engine counter, sampled at 1 ms — far faster than the 150 ms hold-off, so
+     * an edge can never be missed between polls. */
+    void Follow(uint32_t count, uint32_t t_ms)
+    {
+        if (count == lastCount) return;
+        lastCount = count;
+        Fire(t_ms);
+    }
+
+    void Fire(uint32_t t_ms)
+    {
+        if (!High(t_ms)) startMs = t_ms ? t_ms : 1u;   // 0 is the "never fired" sentinel
+    }
+
+    /* 1 ms poll. The trig outs sit on the I2C MCP4728, so write only on edges. */
+    void Poll(uint32_t t_ms, CvJack& jack)
+    {
+        const bool hi = High(t_ms);
+        if (hi == wasHigh) return;
+        wasHigh = hi;
+        jack.SetVolts(hi ? kTrigVolts : 0.0f);
+    }
+
+    bool Lit(uint32_t t_ms) const
+    {
+        return startMs != 0u && (t_ms - startMs) < kTrigLedMs;
+    }
+
+  private:
+    bool High(uint32_t t_ms) const
+    {
+        return startMs != 0u && (t_ms - startMs) < kTrigPulseMs;
+    }
+
+    uint32_t lastCount = 0;
+    uint32_t startMs   = 0;   // 0 = never fired
+    bool     wasHigh   = false;
+};
+
+static TrigOut trig1;   // TRIG 1 — every slice the engine takes
+static TrigOut trig2;   // TRIG 2 — kept output-follower transients
 
 /* ── Hardware / engine ───────────────────────────────────────────────── */
 
@@ -670,9 +729,9 @@ static void OnFrame()
 #endif
 }
 
-/* 1 ms poll: B2 force trigger, B3 tap/hold tracking + the four CV outs. Gate
- * outs sit on the MCP4728 (I²C) so they write only on edges; envelope outs sit
- * on the STM DAC and stream every poll. */
+/* 1 ms poll: B2 force trigger, B3 tap/hold tracking + the four CV outs. Trig
+ * outs sit on the MCP4728 (I²C) so they write only on pulse edges; envelope
+ * outs sit on the STM DAC and stream every poll. */
 static uint32_t sliceFlashMs = 0;   // last button-originated trigger
 
 static void OnPoll(uint32_t t_ms)
@@ -730,10 +789,12 @@ static void OnPoll(uint32_t t_ms)
     else
         resetHoldMs = 0;
 
-    /* B2 = force trigger, on every press. */
+    /* B2 = force trigger, on every press. A forced slice is a real slice, so it
+     * pulses TRIG 1 exactly like an auto-detected one. */
     if (hw.buttons[1].RisingEdge())
     {
         engine.TriggerSlice();
+        trig1.Fire(t_ms);
         sliceFlashMs = t_ms;
     }
 
@@ -747,6 +808,7 @@ static void OnPoll(uint32_t t_ms)
         {
             trigArmed = false;
             engine.TriggerSlice();
+            trig1.Fire(t_ms);
             sliceFlashMs = t_ms;
         }
         else if (!trigArmed && trig < 0.2f)
@@ -787,11 +849,12 @@ static void OnPoll(uint32_t t_ms)
         b1Chorded = false;
     }
 
-    static bool inHi = false, outHi = false;
-    const bool ig = engine.InGate();
-    const bool og = engine.OutGate();
-    if (ig != inHi)  { inHi  = ig; hw.cv_jacks[2].SetVolts(ig ? kGateVolts : 0.0f); }  // panel CV2
-    if (og != outHi) { outHi = og; hw.cv_jacks[4].SetVolts(og ? kGateVolts : 0.0f); }  // panel CV3
+    /* TRIG 1 = every slice the engine actually took (auto-detected, B2 and TRIG
+     * IN alike); TRIG 2 = the output follower's kept transients. */
+    trig1.Follow(engine.SliceCount(),    t_ms);
+    trig2.Follow(engine.OutEventCount(), t_ms);
+    trig1.Poll(t_ms, hw.cv_jacks[2]);   // panel CV2
+    trig2.Poll(t_ms, hw.cv_jacks[4]);   // panel CV3
 
     /* in-env sits on the I²C MCP — write only on meaningful change. */
     static float inEnvLast = -1.0f;
@@ -807,8 +870,9 @@ static void OnPoll(uint32_t t_ms)
 /* Always-on layer, drawn last every frame regardless of page:
  *   B1/B2/B3   wear the mode color (blue while the routing view is open);
  *              activity flashes the LED OFF.
- *   P3..P6 6pm the four output jacks (TRIG 1, TRIG 2, ENV 1, ENV 2). The
- *              ENV 1 pip turns red when the input clips. */
+ *   P3..P6 6pm the four output jacks (TRIG 1, TRIG 2, ENV 1, ENV 2). The trig
+ *              pips run off the same events as the jacks, held kTrigLedMs so a
+ *              10 ms pulse is visible. The ENV 1 pip turns red on input clip. */
 static void OnRender(uint32_t t_ms)
 {
     constexpr uint32_t kSliceFlashVisMs = 60;
@@ -831,8 +895,8 @@ static void OnRender(uint32_t t_ms)
     constexpr LedPanel::Rgb kCvNeg = {255, 10, 0};    // red
 
     const LedPanel::Rgb w = hw.leds.ScaleGlobal(kWhite);
-    if (engine.InGate() || lit) hw.leds.SetRingByHour(2, 6.0f, w);   // B2 press shows too
-    if (engine.OutGate())       hw.leds.SetRingByHour(3, 6.0f, w);
+    if (trig1.Lit(t_ms)) hw.leds.SetRingByHour(2, 6.0f, w);
+    if (trig2.Lit(t_ms)) hw.leds.SetRingByHour(3, 6.0f, w);
 
     /* in-env pip: white by envelope, red when the input clips. */
     constexpr float kClipAt = 0.98f;
@@ -877,8 +941,8 @@ int main(void) {
 
     /* CV IO: left column = inputs (trig top, mod bottom); trigger outs across the
      * top row, envelope outs across the bottom. */
-    hw.cv_jacks[2].EnableCvOutput();   // panel CV2 — input-follower gate
-    hw.cv_jacks[4].EnableCvOutput();   // panel CV3 — output-follower gate
+    hw.cv_jacks[2].EnableCvOutput();   // panel CV2 — slice trigger
+    hw.cv_jacks[4].EnableCvOutput();   // panel CV3 — output-follower trigger
     hw.cv_jacks[3].EnableCvOutput();   // panel CV5 — input-follower envelope
     hw.cv_jacks[5].EnableCvOutput();   // panel CV6 — output-follower envelope
 

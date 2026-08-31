@@ -39,7 +39,6 @@ class Detector {
     double   clock;        // seconds
     uint32_t keptCount;    // monotonic count of KEPT events
     uint32_t totalCount;   // monotonic count of ALL stored events
-    int      gateSamps;    // kept-event monostable countdown (gate/LED/CV)
     int      gapSamps;     // hold-off countdown since the last kept event
     int      minGapSamps;  // hold-off length (see kMinGapSec)
 
@@ -62,7 +61,6 @@ class Detector {
         clock      = 0.0;
         keptCount  = 0;
         totalCount = 0;
-        gateSamps  = 0;
         gapSamps   = 0;
         minGapSamps = (int)(kMinGapSec * fs);
         prevNewer  = {};   // matches a lag-3 read of the freshly zeroed ring
@@ -78,7 +76,6 @@ class Detector {
     float    Average()    const { return avgLp.GetLowpass(); }  // threshold reference
     uint32_t Count()      const { return keptCount; }
     uint32_t TotalCount() const { return totalCount; }
-    bool     Gate()       const { return gateSamps > 0; }       // kept-event monostable
 
     // Was this stored event kept? `idx` is the events ring's MONOTONIC index;
     // callers must stay within the live window.
@@ -90,10 +87,9 @@ class Detector {
     static constexpr float kAvgSec    = 0.1f;
     static constexpr float kAbsFloor  = 1e-5f;   // silence guard: sub-floor peaks aren't events
     static constexpr float kMuteAt    = 100.0f;  // threshold ≥ this = hard mute (UI sentinel)
-    static constexpr float kGateSec   = 0.02f;   // kept-event gate width (CV gate outs + LEDs)
     // Hold-off between kept events. Distinct from the recorder's crossfade
-    // floor: this thins the trigger stream itself, so gate/CV/LED and the
-    // slices they represent stay in step.
+    // floor: this thins the trigger stream itself, so the panel's trig outs and
+    // the slices they represent stay in step.
     static constexpr float kMinGapSec = 0.15f;
 
     // Consume one sample; returns true iff a KEPT event was stored this sample.
@@ -131,14 +127,12 @@ class Detector {
                 totalCount++;
                 if (kept) {
                     keptCount++;
-                    gateSamps = (int)(kGateSec * fs);
                     gapSamps  = minGapSamps;
                     fired     = true;
                 }
             }
         }
-        if (gateSamps > 0) gateSamps--;
-        if (gapSamps  > 0) gapSamps--;
+        if (gapSamps > 0) gapSamps--;
         clock += 1.0 / fs;
         return fired;
     }

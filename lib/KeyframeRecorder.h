@@ -188,11 +188,6 @@ public:
     uint32_t TransientCount() const { return transientCount; }
     float    PairGain()       const { return xGain; }             // takeover ramp state
     float    TkeoEnvelope()   const { return detector.Envelope(); }
-    bool     DetectorGate()   const { return detector.Gate(); }   // LIVE kept-event monostable
-
-    // UI mirror of the LIVE trigger gate — the exact signal that punches the
-    // engine, held for the refractory period.
-    bool     GateActive()     const { return trigGate > 0.0f; }
 
     // Stereo re-alignment guardrail (see AudioEngine::ProcessBlock): did the
     // detector auto-fire this block (forced slices excluded), and how far behind

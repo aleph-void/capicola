@@ -6,7 +6,7 @@
  * sparsifier → granular playback), the filtered feedback loop, the dry/wet mix,
  * and the output-side follower. The UI layer (src/main.cpp) maps knobs to
  * engineering units and pushes them through the setters below; this class
- * exposes the follower/gate/envelope state the panel and CV outs mirror.
+ * exposes the follower/event/envelope state the panel and CV outs mirror.
  */
 
 #ifndef AUDIO_ENGINE_H
@@ -55,11 +55,13 @@ class AudioEngine
     /* ── Follower IO signals (input chain + output chain) ────────────────────
      * The OUTPUT follower is a second Detector on the final (post-mix) mono sum;
      * it shares threshold/smoothing with the input followers but never punches —
-     * auto-slice fires only from the input side. Gates are the LIVE kept-event
-     * monostables (~20 ms, retriggerable). EnvNorm* is the envelope expanded to
-     * 0..1 (sqrt of gained value). */
-    bool  InGate()     const { return inGate; }        // L or R input follower gate
-    bool  OutGate()    const { return outGate; }       // output follower gate
+     * auto-slice fires only from the input side. The two counters are monotonic
+     * EVENT counts, not gates: the panel turns each new count into a fixed-width
+     * trigger. Both carry the detector's kMinGapSec hold-off, so consecutive
+     * events on one counter are always >= 150 ms apart. EnvNorm* is the envelope
+     * expanded to 0..1 (sqrt of gained value). */
+    uint32_t SliceCount() const { return sliceCount; }   // slices the engine actually took
+    uint32_t OutEventCount() const { return outDet.Count(); }  // kept output-follower events
     float EnvNormIn()  const { return envNormIn; }     // 0..1 (max of L/R)
     float EnvNormOut() const { return envNormOut; }    // 0..1
 
@@ -89,8 +91,11 @@ class AudioEngine
 
     /* Output-side follower (final mono-summed output) + cached IO signals. */
     capicola::Detector outDet;
-    bool  inGate     = false;
-    bool  outGate    = false;
+    /* Slice events: one tick per audio block in which either channel actually
+     * punched (post-refractory). L/R skew inside a block collapses here; skew
+     * across blocks is absorbed by the panel's pulse generator. Forced slices
+     * (B2 / TRIG IN) are counted by the caller, which owns that edge already. */
+    uint32_t sliceCount = 0;
     float envNormIn  = 0.0f;
     float envNormOut = 0.0f;
     float inPeak     = 0.0f;

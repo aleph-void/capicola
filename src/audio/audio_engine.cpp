@@ -88,7 +88,7 @@ void AudioEngine::Init()
      * mono-summed output. Never punches — signal source only. */
     outDet.Init(48000.0f);
     SetTkeoCutoff(kTkeoFc);
-    inGate     = outGate     = false;
+    sliceCount = 0;
     envNormIn  = envNormOut  = 0.0f;
     inPeak     = 0.0f;
 
@@ -147,6 +147,11 @@ void AudioEngine::ProcessBlock(const float* in_l, const float* in_r,
             (fired_l ? sparse_r : sparse_l).SubmitRequest(Request::SLICE);
     }
 
+    /* One slice event per block in which either channel punched. The guardrail
+     * slice above is a re-anchor of the quiet channel, not a second musical
+     * hit, so it deliberately does not add a tick. */
+    if (fired_l || fired_r) sliceCount++;
+
     /* Stash this block's wet (pitched) output for next block's feedback, before
      * the dry/wet blend overwrites the out buffers. */
     for (std::size_t i = 0; i < m; i++) { fbL[i] = out_l[i]; fbR[i] = out_r[i]; }
@@ -162,7 +167,7 @@ void AudioEngine::ProcessBlock(const float* in_l, const float* in_r,
 
     /* Output follower consumes the final (post-mix) mono sum. Fed at 2× (no 0.5
      * halving): TKEO is quadratic, so this lifts the envelope 4× to sit level
-     * with the per-channel input followers. Gate behavior is unaffected — the
+     * with the per-channel input followers. Event timing is unaffected — the
      * dynamic threshold is a scale-invariant ratio over its own average. */
     for (std::size_t i = 0; i < m; i++)
         outDet.Analyze(out_l[i] + out_r[i]);
@@ -171,8 +176,6 @@ void AudioEngine::ProcessBlock(const float* in_l, const float* in_r,
     const float env_r = sparse_r.TkeoEnvelope();
     envNormIn  = EnvNorm((env_l > env_r) ? env_l : env_r);
     envNormOut = EnvNorm(outDet.Envelope());
-    inGate     = sparse_l.DetectorGate() || sparse_r.DetectorGate();
-    outGate    = outDet.Gate();
 
     /* Input peak meter (decaying abs max) — the UI clip indicator reads it. */
     constexpr float kPeakDecay = 0.95f;

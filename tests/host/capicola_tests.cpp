@@ -525,6 +525,88 @@ static void test_keyframe_recorder()
     CHECK(kr.GetState() == State::PLAYBACK);
 }
 
+/* ── Trigger stream (the panel's TRIG 1 / P3 source) ────────────────── */
+
+/* Clicks every 60 ms over a quiet drone: packed tighter than the detector's
+ * 150 ms hold-off AND tighter than a long crossfade, so both thinning stages
+ * are exercised. */
+static float fast_clicks(int n)
+{
+    float x = 0.2f * std::sin(2.0 * M_PI * 110.0 * n / kFs);
+    if (n % 2880 < 16) x += 0.9f;
+    return x;
+}
+
+/* Block indices where the engine actually punched — TransientCount() edges,
+ * which is exactly the stream the trig out pulses on. */
+static std::vector<int> punch_blocks(KeyframeRecorder<1024>& kr, int blocks,
+                                     int& clock)
+{
+    std::vector<int> hits;
+    float    in[64], out[64];
+    uint32_t last = kr.TransientCount();
+    for (int b = 0; b < blocks; b++) {
+        for (int i = 0; i < 64; i++, clock++) in[i] = fast_clicks(clock);
+        kr.ProcessBlock(in, out, 64);
+        if (kr.TransientCount() != last) {
+            last = kr.TransientCount();
+            hits.push_back(b);
+        }
+    }
+    return hits;
+}
+
+/* Gaps are measured in whole blocks, so a punch can read one block late. */
+static double min_gap_sec(const std::vector<int>& hits)
+{
+    double lo = 1e9;
+    for (size_t i = 1; i < hits.size(); i++) {
+        const double g = (double)(hits[i] - hits[i - 1]) * 64.0 / (double)kFs;
+        if (g < lo) lo = g;
+    }
+    return lo;
+}
+
+static void test_trigger_stream()
+{
+    section("trigger stream (TRIG 1 / P3 source)");
+
+    static KeyframeRecorder<1024> kr;
+    const double blockSec = 64.0 / (double)kFs;
+
+    /* Boot fade (20 ms): the detector's hold-off is the only thinner, so no two
+     * punches — and therefore no two trigger pulses — land closer than
+     * kMinGapSec, even though the source clicks at 60 ms. */
+    kr.Init();
+    kr.SetGrainFade(960.0f);          /* 20 ms */
+    kr.SetTransientThreshold(2.0f);
+    kr.SubmitRequest(Request::LIVE_EFFECT);
+    int clock = 0;
+    const std::vector<int> shortFade = punch_blocks(kr, 3000, clock);  /* ~4 s */
+    const double shortGap = min_gap_sec(shortFade);
+    std::printf("   fade 20 ms:  %zu punches, min gap %.3f s (hold-off %.3f)\n",
+                shortFade.size(), shortGap, (double)Detector::kMinGapSec);
+    CHECK(shortFade.size() >= 8);
+    CHECK(shortGap >= (double)Detector::kMinGapSec - blockSec);
+
+    /* Top-of-range fade (250 ms) outruns the hold-off, so the recorder's own
+     * refractory thins the stream further. This is the case the old
+     * follower-gate LED/CV path got wrong: it pulsed on every kept event while
+     * the engine was still refusing the punch. */
+    kr.Init();
+    kr.SetGrainFade(12000.0f);        /* 250 ms — top of the UI range */
+    kr.SetTransientThreshold(2.0f);
+    kr.SubmitRequest(Request::LIVE_EFFECT);
+    clock = 0;
+    const std::vector<int> longFade = punch_blocks(kr, 3000, clock);
+    const double longGap = min_gap_sec(longFade);
+    std::printf("   fade 250 ms: %zu punches, min gap %.3f s (fade %.3f)\n",
+                longFade.size(), longGap, 12000.0 / (double)kFs);
+    CHECK(longFade.size() >= 4);
+    CHECK(longFade.size() < shortFade.size());          /* genuinely thinned */
+    CHECK(longGap >= 12000.0 / (double)kFs - blockSec);
+}
+
 /* ── fuzz: random params, hostile input, small ring ─────────────────── */
 
 static void test_fuzz()
@@ -594,6 +676,7 @@ int main()
     test_detector();
     test_granule();
     test_keyframe_recorder();
+    test_trigger_stream();
     test_fuzz();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
