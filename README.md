@@ -63,6 +63,20 @@ The `arm-bench` preset builds the same image with a 1 Hz CPU/CV serial log
 on the front USB instead of HostLink (they share the CDC port) into
 `build-arm-bench/`.
 
+## Install a release
+
+If you just want to run it, you don't need the toolchain. Grab `capicola.bin`
+from the [latest release](https://github.com/heavylight-industries/capicola/releases),
+put the module in update mode (hold **B3** through the ~2 s boot window, or hold
+it while powering on), and flash it over the front USB-C:
+
+```sh
+dfu-util -a 0 -s 0x90040000:leave -D capicola.bin -d ,0483:df11
+```
+
+`dfu-util` is packaged for every major platform (`apt install dfu-util`,
+`brew install dfu-util`). Everything below is for building from source instead.
+
 ## Flash (Daisy bootloader / front USB-C)
 
 Put the module in update mode (hold **B3** through the ~2 s boot window, or

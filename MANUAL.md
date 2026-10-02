@@ -1,6 +1,6 @@
 # Capicola — Panel Reference
 
-*Auto-slicer / keyframe time-stretcher, Alchemy Lab V2. Firmware 0.3.0, 2026-07-27.*
+*Auto-slicer / keyframe time-stretcher, Alchemy Lab V2. Firmware 1.0.0, 2026-10-01.*
 
 > **Interactive version:**
 > [heavylight-industries.github.io/capicola/manual.html](https://heavylight-industries.github.io/capicola/manual.html)
@@ -12,6 +12,16 @@ rising edge on **TRIG IN** — splices the granular playback head onto fresh
 material. Pitch and time-stretch are fully decoupled, and the stretch grid
 re-anchors on every trigger, so stretched tails ring out underneath while the
 output stays locked to the incoming rhythm.
+
+**Both axes run backwards.** P1 reverses the grains, P2 reverses the stretch
+grid, and they are independent — so forward grains over a reversing grid, or
+reversed grains over a forward one, are settings rather than accidents. The two
+combine in ways that are easier to hear than to describe: with only the grid
+reversed, each grain still plays forward but starts earlier than the last, so
+the material scrubs backward while the timbre stays put; with only the grains
+reversed, time runs forward while every slice plays itself backwards. Reverse
+both and they partly cancel — the grid and the head travel together, so they
+separate slowly and the splices come further apart.
 
 The wet path's latency is the OLA crossfade: **20 ms** by default, adjustable
 10–250 ms on the secondary page. The fade is also the retrigger floor —
@@ -34,7 +44,7 @@ within the group.
 The active page's mode color is worn simultaneously by all three button LEDs.
 Button LEDs are never off, so activity feedback is a **dark flash**: B2 blinks
 off when a trigger fires, and all three blink off three times to confirm a
-settings save or reset.
+settings save or a page reset.
 
 **Pot catch:** every page keeps stored values per knob. After boot or a page
 switch, a knob is *decoupled* until the physical pot sweeps through the stored
@@ -42,12 +52,68 @@ value (the ring shows a muted pip at the stored position) — then it catches an
 tracks. Nothing ever jumps. On the routing page the catch is zone-granular:
 entering the stored zone is enough.
 
-**Settings:** hold **B2 for 1.5 s** to save everything (all four pages) as the
-boot state — QSPI preset slot 0, confirmed by the triple dark blink. (The press
-still fires its slice on the way down.) On boot the module restores that save,
-or falls back to factory defaults. Hold **B1+B3 for 0.5 s** to reset the
-*currently visible page only* to factory defaults (same blink; the QSPI save is
-untouched until the next B2 hold).
+**Settings:** hold **B1+B2 for 0.33 s** to save everything (all four pages) as
+the boot state — QSPI slot 0, confirmed by the triple dark blink. The module
+restores that save at power-up, or falls back to factory defaults if there
+isn't one. Hold **B1+B3 for 0.5 s** to reset the *currently visible page* to
+factory defaults instead; the saved slot is untouched until the next B1+B2.
+
+B2 on its own is the ping-pong gesture below, so the two never collide — and
+while B1 is down, nudging a knob can't flip a polarity.
+
+### Ping-pong — hold B2 and flip direction
+
+> **Hold B2 and P1 or P2 stops being a value and becomes a *direction*
+> control.** The rate pins where it was, and a small nudge of the knob either
+> way flips polarity *at that same rate* — forward grains to reverse without the
+> pitch moving, or the grid's direction without its speed moving.
+
+Crossing noon by hand also reverses a knob, but the rate has to travel down
+through the centre and back out to get there. The gesture is the shortcut: the
+polarity changes and nothing else does.
+
+A pitch flip never reverses the playing head in place — that would put a corner
+in the waveform. The idle grain takes over from the exact same spot in the new
+direction and the two crossfade over one fade time, the same ramp a trigger
+uses. If a trigger's ramp is already running, the flip lands when it finishes.
+
+The press still fires its slice on the way down, so every flip lands on a fresh
+splice — which is most of why it works for fills.
+
+Let go and the knob **stays where the gesture left it**, inert behind a catch
+pip, until you sweep the pot through that pip. It is the same decoupling as a
+page switch and the pip means the same thing. Press B2 again and the gesture
+resumes from what is *playing*, not from where the pot happens to be sitting.
+
+A CV riding the knob nudges it too, so an LFO into P1 with B2 held ping-pongs on
+its own, flipping at the LFO's turning points.
+
+### Running out of buffer
+
+The recorder writes continuously into a fixed ring. Anything that stops the
+stretch grid keeping up with the writer eventually runs out of room behind it,
+and the module handles that the same way every time: **a full fixed-fade
+re-anchor to the delayed tap** — i.e. it jumps to "now" and carries on, with a
+crossfade rather than a click.
+
+Three ways to get there:
+
+- **Freeze and wait.** At the centre of P2 the grid stops while the writer keeps
+  going. Left alone it will eventually hit the back of the ring and re-anchor.
+- **Reverse and wait.** The grid walking backward separates from the writer
+  faster than a freeze does — at realtime reverse, about twice as fast.
+- **Reverse early in a session.** Before the ring has filled there is simply
+  nothing older to read, so the grid reaches the oldest frame it has and
+  re-anchors there instead.
+
+How long any of this takes is counted in *keyframes, not seconds*, so it depends
+entirely on the material — dense, bright input fills the ring far faster than a
+sparse one. On busy material expect minutes.
+
+There is a separate, quieter case, only in the first moments after power-up: a
+reversed **read head** with a long grain can walk back to the very start of the
+recording before its grain ends. It holds the oldest sample there — silence,
+not a click — until the next splice or trigger moves it.
 
 ---
 
@@ -55,11 +121,11 @@ untouched until the next B2 hold).
 
 | Knob | Function | Range | Notes |
 |---|---|---|---|
-| P1 | Pitch | ±12 semitones | Unity at noon, with a ±0.2 st detent that snaps to true 0. Grain pitch only — time is untouched. |
-| P2 | Stretch | 1.0 → frozen | CCW = realtime; noon ≈ 6× slow; full CW is a **true freeze** (the grid stops). Taper is (1−x)^2.5. |
+| P1 | Pitch | ±2×, bipolar | Playback speed of the grains, linear. CW of noon they play **forward**, CCW **in reverse**, up to 2× either way. **Noon stops the head.** Unity sits at ¼ and ¾, with a detent holding each. Grain speed and direction only — the stretch clock keeps its own. |
+| P2 | Stretch | ±1.0, bipolar | **Freeze at noon** (the grid stops). CW → realtime forward, CCW → realtime **reverse**; ¾ up ≈ 6× slow. Taper is \|u\|^2.5 each side. |
 | P3 | Threshold | ratio 0–8 | See below — it's relative, not absolute. |
 | P4 | Grain size | 32–4096 keyframes | The adaptive splice leash. |
-| P5 | Quality | ε 0.1 → 0.001 | Analyzer keyframe threshold. CCW = crunchy sparse reconstruction, CW = max fidelity. |
+| P5 | Quality | ε 0.03 → 0.001 | Analyzer keyframe threshold. CCW = crunchy sparse reconstruction, CW = max fidelity. |
 | P6 | Feedback | 0–1.5 loop gain | See below. |
 
 **P3 — threshold is self-calibrating.** The detector tracks a running average
@@ -110,10 +176,12 @@ performance knob, CCW → CW:
 | 3 | CV IN jack | violet | bipolar ±1 |
 
 The ring always shows all three zones dim with the selected zone at full
-brightness — it doubles as the position map. Default source is the **output**
-follower, which makes the module self-modulating out of the box — and since
-the output envelope reflects what the module itself is doing, depth alone
-closes a feedback loop through the modulation.
+brightness — it doubles as the position map. Default source is the **input**
+follower (`RoutingStore::zone` is all zeroes, and B1+B3 resets to zone 0), so
+out of the box the module modulates from what you feed it. Selecting the
+*output* follower instead makes a knob self-modulating, since that envelope
+reflects what the module is already doing — depth alone then closes a loop
+through the modulation.
 
 The two followers are the detectors' own smoothed TKEO envelopes (input side =
 max of L/R; output side runs on the final post-mix mono sum). They share the
@@ -158,8 +226,8 @@ unity pitch. Full wet is the classic Capicola behavior.
 
 | | Idle | Action |
 |---|---|---|
-| **B1** | mode color | Click: primary ↔ depth (or return to the B1 group). Held with B3 0.5 s: reset visible page. |
-| **B2** | mode color | Press: force-trigger a splice on both channels (works even at threshold mute). Held 1.5 s: save settings. Dark blink on trigger. |
+| **B1** | mode color | Click: primary ↔ depth (or return to the B1 group). Held with B2 0.33 s: save boot state. Held with B3 0.5 s: reset visible page. |
+| **B2** | mode color | Press: force-trigger a splice on both channels (works even at threshold mute). Held: ping-pong gesture on P1/P2 — nudge the knob to flip playback direction at a constant rate. Dark blink on trigger. |
 | **B3** | mode color | Click: routing ↔ secondary (or return to the B3 group). |
 
 ---
@@ -193,5 +261,8 @@ Output is the mix; there is no dry normalling in hardware.
 | Constant | Value | What it is |
 |---|---|---|
 | `kFbSatGain` | 0.5 | feedback saturator scaling (unity small-signal loop gain) |
-| `kMaxDriftSamples` | 48000 (1 s) | stereo re-alignment guardrail — if one channel auto-fires and the grids have drifted > 1 s, the quiet channel is forced to re-anchor |
+| `kMaxDriftSamples` | 48000 (1 s) | stereo re-alignment guardrail — if one channel auto-fires and the two grids have drifted more than 1 s apart, the quiet channel is forced to re-anchor. Direction-agnostic: it measures the gap, not which way either grid is going |
 | boundary keyframes | gap-gated, fade/2 | coverage guard frames, written only when no extremum has been logged recently |
+| `kPitchMax` | 2× | grain speed at either end of P1 |
+| `kPitchDetent` | ±0.03× | how wide the unity hold is at each of P1's ¼ and ¾ points |
+| `kGestureNudge` | 1.5% of sweep | how far a knob must move under a held B2 to count as a polarity flip |

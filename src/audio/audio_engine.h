@@ -38,7 +38,7 @@ class AudioEngine
     /* ── Parameter setters — ENGINEERING UNITS ───────────────────────────────
      * Knob→value mapping lives in the VirtualKnob declarations in main.cpp;
      * these take the mapped values directly. */
-    void SetSlicePitch          (float semis);   // P1 — pitch in semitones (0 = unity)
+    void SetSlicePitch          (float speed);   // P1 — signed playback speed (1 = unity, <0 = reverse)
     void SetSliceStretch        (float stretch); // P2 — time stretch, 0.01..1
     void SetTransientThreshold  (float t);       // P3 — finder keep ratio (TKEO gate)
     void SetGrainSize           (float keyframes);// P4 — grain size (adaptive leash, keyframes)

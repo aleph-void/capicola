@@ -53,13 +53,14 @@ static VirtualButton b1 = VirtualButton(kButtonB1, "B1")
     .Ident("b1")
     .Role(VirtualButton::Role::Modal)
     .Action("click", "Primary / Depth")
+    .Action("hold-b1-b2", "Save boot state")
     .Action("hold-b1-b3", "Reset visible page");
 
 static VirtualButton b2 = VirtualButton(kButtonB2, "B2")
     .Ident("b2")
     .Role(VirtualButton::Role::Modal)
     .Action("press", "Slice")
-    .Action("hold", "Save boot state");
+    .Action("hold", "Ping-pong: flip P1/P2 direction");
 
 static VirtualButton b3 = VirtualButton(kButtonB3, "B3")
     .Ident("b3")
@@ -184,12 +185,12 @@ static Manual manual =
                  "All three buttons wear the visible page's hue and are "
                  "never off, so activity reads as a **dark flash**: B2 "
                  "blinks off on a slice, and all three blink three times to "
-                 "confirm a save or a reset.\n\n"
+                 "confirm a settings save or a page reset.\n\n"
                  "The pip at six o'clock on **P3**–**P6** mirrors the four "
                  "CV outputs — Trig 1, Trig 2, Env 1, Env 2. Env 1 turns "
                  "red when the input clips.")
         .PresetsHelp(
-            "Slot 0 is the boot state: **B2** held writes it, and the "
+            "Slot 0 is the boot state: **B1+B2** held writes it, and the "
             "module loads it at power-up. The remaining slots are read and "
             "written from the programmer.");
 
@@ -208,12 +209,16 @@ void AttachManualHelp()
         "Applied to the knob's *position*, so a modulated knob keeps its "
         "own taper and endpoints.");
 
-    pitch.Help("Grain pitch, decoupled from time. A detent at noon snaps to "
-               "true unity.")
+    pitch.Help("Grain playback speed, decoupled from time, and bipolar: CW "
+               "of noon the grains play **forward**, CCW they play "
+               "**backward**, up to 2x either way. Noon stops the head; a "
+               "detent holds unity on each side.")
         .SeeAlso(stretch, cvDepth1);
-    stretch.Help("Playback rate of the keyframe grid: realtime at CCW, a "
-                 "**true freeze** at the stop — the grid stops rather than "
-                 "crawling. Triggers still re-anchor it while frozen.")
+    stretch.Help("Playback rate of the keyframe grid, bipolar. **True freeze "
+                 "at noon** — the grid stops rather than crawling. CW runs "
+                 "forward to realtime, CCW runs the grid **backward** to "
+                 "realtime reverse. Triggers re-anchor it to now from either "
+                 "direction, so reverse always has somewhere to snap back to.")
         .SeeAlso(pitch, cvDepth2);
     threshold.Help("Self-calibrating: events are kept at `knob × running "
                    "average` of the detector's own envelope. **The top of the knob mutes "
@@ -261,17 +266,24 @@ void AttachManualHelp()
         .GestureHelp("click",
                      "Steps Primary → Depth, or returns to where the group "
                      "was left.")
+        .GestureHelp("hold-b1-b2",
+                     "With B2, a third of a second: saves all four pages as "
+                     "the boot state. B2 alone is the ping-pong gesture, so "
+                     "holding B1 keeps a knob nudge from flipping anything.")
         .GestureHelp("hold-b1-b3",
                      "With B3, half a second: resets the visible page to "
                      "factory defaults.")
         .SeeAlso(b3);
-    b2.Help("Slice, and save.")
+    b2.Help("Slice, and flip playback direction.")
         .GestureHelp("press",
                      "Fires a slice, jumping the read head to the current "
                      "time.")
         .GestureHelp("hold",
-                     "A second and a half: saves all four pages as the boot "
-                     "state. The press still slices on the way down.")
+                     "Ping-pong: Pitch and Stretch pin their rate and become "
+                     "direction controls — nudge either knob to flip its "
+                     "direction without the rate moving. Release and the knob "
+                     "waits behind a catch pip. The press still slices on the "
+                     "way down.")
         .SeeAlso(threshold, trig_in);
     b3.Help("Rotates between the two secondary pages (cool colors).")
         .GestureHelp("click",

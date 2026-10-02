@@ -194,11 +194,10 @@ void AudioEngine::ProcessBlock(const float* in_l, const float* in_r,
     cpuMax = cpuMeter.GetMaxCpuLoad();
 }
 
-void AudioEngine::SetSlicePitch(float semis)
+void AudioEngine::SetSlicePitch(float speed)
 {
-    const float v = std::exp2(semis / 12.0f);
-    sparse_l.SetGrainPitch(v);
-    sparse_r.SetGrainPitch(v);
+    sparse_l.SetGrainPitch(speed);
+    sparse_r.SetGrainPitch(speed);
 }
 
 void AudioEngine::SetSliceStretch(float stretch)

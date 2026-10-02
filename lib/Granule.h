@@ -189,10 +189,17 @@ public:
     // Produce one output sample, shaping each keyframe on the way out.
     template <typename ShapeFn>
     float Read(ShapeFn fn) {
-        // Keep every cursor's keyframe bracket ahead of its index.
-        if (ideal.index  > ideal.w.endTime)          sparse_->StepWindow(ideal.w,  ideal.index);
-        if (actual.index > actual.w.endTime)         sparse_->StepWindow(actual.w, actual.index);
-        if (splicing && temp.index > temp.w.endTime) sparse_->StepWindow(temp.w,   temp.index);
+        // Keep every cursor's keyframe bracket AROUND its index. Two-sided: at
+        // negative stretch the grid walks backward out of its window, which a
+        // past-the-end test never notices, and the window then stays stale for
+        // the rest of the pass. StepWindow always handled both directions; only
+        // the call was one-sided.
+        if (ideal.index  > ideal.w.endTime  || ideal.index  < ideal.w.p2->time)
+            sparse_->StepWindow(ideal.w,  ideal.index);
+        if (actual.index > actual.w.endTime || actual.index < actual.w.p2->time)
+            sparse_->StepWindow(actual.w, actual.index);
+        if (splicing && (temp.index > temp.w.endTime || temp.index < temp.w.p2->time))
+            sparse_->StepWindow(temp.w,   temp.index);
 
         // Refresh live distances. Indices are monotonic, so these are plain
         // subtractions — signed and correct across any number of ring wraps.
@@ -221,7 +228,12 @@ public:
                     : (double)fixedDuration * (1.0 - 1.0 / (double)pitch);
                 frontBreach = runway.uniform <= closing + (double)blockSize;
             }
-            bool backBreach = backlog.sparse >= kSafetyKeyframes;   // writer lapping grid
+            // Back edge, from either side: the writer lapping the grid, or the
+            // grid reversing onto the oldest frame still live. Both mean the
+            // same thing — there is nothing behind us — and both loop to the
+            // delayed tap over a full fixed fade.
+            bool backBreach = backlog.sparse >= kSafetyKeyframes
+                           || ideal.w.index <= sparse_->GetOldestIndex() + 1;
             if (backBreach) {
                 // The GRID is about to fall off the ring: full reset to the tap.
                 ReanchorMaster();
@@ -249,7 +261,10 @@ public:
             // fades across the span ahead, then CLAMPS to 90% of the runway so
             // the fade lands with room to spare.
             long long sparseIndex = ideal.w.index;
-            if (distance.sparse < 0)   // head lags the grid: budget behind
+            // Budget behind when the head lags the grid, and also whenever the
+            // grid itself is reversing — that is the side it is heading into.
+            // The sign of `stretch` already says so; no extra state for it.
+            if (distance.sparse < 0 || stretch < 0.0f)
                 adaptiveDuration = (float)(sparse_->GetSample(sparseIndex - 1)->time
                                          - sparse_->GetSample(sparseIndex - leash)->time);
             else                       // head leads the grid: budget ahead
@@ -278,7 +293,9 @@ public:
 
             const float w = SmoothStep(splicePhase);
             float mixed = (in * w) + (out * (1.0f - w));
-            splicePhase += (adaptive ? adaptiveIncrement : fixedIncrement) * pitch;
+            // |pitch|: the fade spans buffer samples, crossed in either direction.
+            splicePhase += (adaptive ? adaptiveIncrement : fixedIncrement)
+                         * (pitch < 0.0f ? -pitch : pitch);
             return mixed;
         }
         // ── crossfade complete: adopt the incoming cursor ────────────────────

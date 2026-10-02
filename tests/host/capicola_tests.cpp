@@ -420,6 +420,76 @@ static void test_granule()
     }
     std::printf("   worst runway at pitch 2.0: %.1f samples\n", worstRunway);
     CHECK(worstRunway > -64.0);
+
+    /* ── reverse: the grid walks backward ──────────────────────────────────
+     * A one-sided "past the end" bracket test never notices a cursor leaving
+     * its window the OTHER way, so the window goes stale and the read sticks
+     * at a clamped endpoint while the index keeps moving. Silent — no NaN, no
+     * discontinuity — so assert on the thing that actually breaks: the window
+     * must keep bracketing the index, and the output must keep moving. */
+    static SparseLine<1024> sl3;
+    sl3.Init();
+    for (int i = 0; i < 400; i++)
+        sl3.Write({(i & 1) ? -1.0f : 1.0f, 100.0 * i});
+
+    static Granule<1024> g3;
+    g3.Init(sl3, 30000.0);
+    g3.SetPitch(1.0f);
+    g3.SetStretch(-1.0f);          // grid reverses at realtime
+    g3.SetLeash(4);                // splice often, so the grid is what drives
+    g3.SetFade(240.0f);
+    g3.BeginBlock(64);
+
+    int   distinct = 0;
+    float last     = 1e9f;
+    double startIdeal = g3.GetIdeal().uniform;
+    for (int i = 0; i < 20000; i++) {
+        const float y = g3.Read();
+        CHECK(std::isfinite(y));
+        CHECK(std::fabs(y) <= 1.0f + 1e-3f);
+        if (std::fabs(y - last) > 1e-6f) distinct++;
+        last = y;
+        if (g_failures > 10) return;
+    }
+    const double endIdeal = g3.GetIdeal().uniform;
+    std::printf("   reverse: grid %.0f -> %.0f, %d distinct output steps\n",
+                startIdeal, endIdeal, distinct);
+    CHECK(endIdeal < startIdeal);          // the grid actually went backward
+    CHECK(distinct > 19000);               // and the read never stuck
+
+    /* The back edge is a loop point: reversing onto the oldest live frame
+     * re-anchors to the delayed tap rather than clamping there forever. */
+    g3.Init(sl3, 400.0);                   // start near the front of the buffer
+    g3.SetStretch(-1.0f);
+    g3.SetLeash(4);
+    g3.BeginBlock(64);
+    bool looped = false;
+    for (int i = 0; i < 4000; i++) {
+        const float y = g3.Read();
+        CHECK(std::isfinite(y));
+        if (g3.GetIdeal().uniform > 1000.0) looped = true;   // jumped forward
+        if (g_failures > 10) return;
+    }
+    CHECK(looped);
+
+    /* Reverse PITCH: the head walks backward. The splice phase advances with
+     * the head's speed; signed, it would run backward and no fade would ever
+     * land. Count fades that actually complete. */
+    g3.Init(sl3, 12000.0);
+    g3.SetPitch(-1.0f);
+    g3.SetStretch(1.0f);
+    g3.SetLeash(4);
+    g3.BeginBlock(64);
+    int landed = 0;
+    bool wasSplicing = false;
+    for (int i = 0; i < 15000; i++) {
+        CHECK(std::isfinite(g3.Read()));
+        if (wasSplicing && !g3.IsSplicing()) landed++;
+        wasSplicing = g3.IsSplicing();
+        if (g_failures > 10) return;
+    }
+    std::printf("   reverse pitch: %d fades landed\n", landed);
+    CHECK(landed > 10);
 }
 
 /* ── KeyframeRecorder ───────────────────────────────────────────────── */
@@ -497,6 +567,26 @@ static void test_keyframe_recorder()
                 "(slew %.4f)\n", rms, 1.0 / std::sqrt(2.0), maxDelta, sineSlew);
     CHECK_NEAR(rms, 1.0 / std::sqrt(2.0), 0.08);
     CHECK(maxDelta < 5.0f * sineSlew);
+
+    /* Direction flips must not click. Reversing a moving head in place is a
+     * corner — the slope flips sign — which only the second difference sees.
+     * Flip every 40 blocks on the same sine and hold the worst corner to the
+     * sine's own curvature. */
+    float worstD2 = 0.0f, p1 = out[62], p2 = out[63];
+    for (int b = 0; b < 400; b++) {
+        if (b % 40 == 0) kr.SetGrainPitch((b / 40) & 1 ? 1.0f : -1.0f);
+        for (int i = 0; i < 64; i++, clock++) in[i] = sine220(clock);
+        kr.ProcessBlock(in, out, 64);
+        for (int i = 0; i < 64; i++) {
+            const float d2 = std::fabs(out[i] - 2.0f * p2 + p1);
+            if (d2 > worstD2) worstD2 = d2;
+            p1 = p2; p2 = out[i];
+        }
+    }
+    const float sineD2 = sineSlew * sineSlew;   // ≈ 0.00083
+    std::printf("   direction flips: worst corner %.5f (sine %.5f)\n", worstD2, sineD2);
+    CHECK(worstD2 < 2.0f * sineD2);
+    kr.SetGrainPitch(1.0f);
 
     /* Stretch + pitch shift on transient material: finite, bounded, and the
      * detector actually fires (the LIVE trigger path is exercised). */

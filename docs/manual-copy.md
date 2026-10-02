@@ -29,19 +29,19 @@ Both followers are the detectors' own smoothed TKEO envelopes — input side is 
 
 ## Section — Reading the Panel  `#panel`
 
-All three buttons wear the visible page's hue and are never off, so activity reads as a **dark flash**: B2 blinks off on a slice, and all three blink three times to confirm a save or a reset.
+All three buttons wear the visible page's hue and are never off, so activity reads as a **dark flash**: B2 blinks off on a slice, and all three blink three times to confirm a settings save or a page reset.
 
 The pip at six o'clock on **P3**–**P6** mirrors the four CV outputs — Trig 1, Trig 2, Env 1, Env 2. Env 1 turns red when the input clips.
 
 ## Primary page knobs
 
-### Pitch  `perf.pitch` — linear -12…12 st
-Grain pitch, decoupled from time. A detent at noon snaps to true unity.
+### Pitch  `perf.pitch` — linear -2…2 x
+Grain playback speed, decoupled from time, and bipolar: CW of noon the grains play **forward**, CCW they play **backward**, up to 2x either way. Noon stops the head; a detent holds unity on each side.
 
 *See also: perf.stretch, depth.p1*
 
 ### Stretch  `perf.stretch` — 0…100 %
-Playback rate of the keyframe grid: realtime at CCW, a **true freeze** at the stop — the grid stops rather than crawling. Triggers still re-anchor it while frozen.
+Playback rate of the keyframe grid, bipolar. **True freeze at noon** — the grid stops rather than crawling. CW runs forward to realtime, CCW runs the grid **backward** to realtime reverse. Triggers re-anchor it to now from either direction, so reverse always has somewhere to snap back to.
 
 *See also: perf.pitch, depth.p2*
 
@@ -162,15 +162,15 @@ External slice trigger. Rising edge, always accepted — even at threshold mute.
 External modulation source, routable to any Primary knob from the Routing page. The only bipolar source of the three.
 
 ### Trig 1  `trig.1` — trig, silk **TRIG 1**
-Triggers a slice, same as pressing the slice button.
+A 10 ms pulse on every slice the engine takes — detected transients, B2 presses and TRIG IN edges alike. Never faster than the 150 ms hold-off, and a long fade thins it further.
 
-*See also: perf.threshold*
+*See also: perf.threshold, b2*
 
 ### Env 1  `env.1` — cv-uni, silk **ENV 1**
 Input follower envelope, mirrored on the P5 pip.
 
 ### Trig 2  `trig.2` — trig, silk **TRIG 2**
-Gate on the output follower's transients.
+A 10 ms pulse on each of the output follower's kept transients. Same 150 ms hold-off; never splices anything.
 
 ### Env 2  `env.2` — cv-uni, silk **ENV 2**
 Output follower envelope, mirrored on the P6 pip.
@@ -187,15 +187,16 @@ Right output, post-mix.
 Rotates between the two primary pages (warm colors).
 
 - **Primary / Depth** (`click`) — Steps Primary → Depth, or returns to where the group was left.
+- **Save boot state** (`hold-b1-b2`) — With B2, a third of a second: saves all four pages as the boot state. B2 alone is the ping-pong gesture, so holding B1 keeps a knob nudge from flipping anything.
 - **Reset visible page** (`hold-b1-b3`) — With B3, half a second: resets the visible page to factory defaults.
 
 *See also: b3*
 
 ### B2  `b2`
-Slice, and save.
+Slice, and flip playback direction.
 
 - **Slice** (`press`) — Fires a slice, jumping the read head to the current time.
-- **Save boot state** (`hold`) — A second and a half: saves all four pages as the boot state. The press still slices on the way down.
+- **Ping-pong: flip P1/P2 direction** (`hold`) — Ping-pong: Pitch and Stretch pin their rate and become direction controls — nudge either knob to flip its direction without the rate moving. Release and the knob waits behind a catch pip. The press still slices on the way down.
 
 *See also: perf.threshold, trig.in*
 
@@ -208,5 +209,5 @@ Rotates between the two secondary pages (cool colors).
 
 ## Presets — SDK stock text (override with `Manual::PresetsHelp`)
 
-Slot 0 is the boot state: **B2** held writes it, and the module loads it at power-up. The remaining slots are read and written from the programmer.
+Slot 0 is the boot state: **B1+B2** held writes it, and the module loads it at power-up. The remaining slots are read and written from the programmer.
 

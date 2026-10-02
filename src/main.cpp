@@ -4,11 +4,11 @@
  *
  * Perf-page knobs (ranges are the spec; the map lives in the VirtualKnob decls):
  *
- *   P1 Pitch      ±12 semitones (unity at noon; ±0.2 st detent snaps to true 0)
- *   P2 Stretch    1.0 (realtime) .. 0 (frozen), (1-x)^2.5 taper
+ *   P1 Pitch      playback speed, bipolar ±2x; stop at noon, detents at ±1x
+ *   P2 Stretch    bipolar +-1x; freeze at noon, |u|^2.5 taper each side
  *   P3 Threshold  keep ratio 0..8 over the envelope average (90% = 4, top = mute)
  *   P4 Grain Size 32 .. 4096 keyframes
- *   P5 Quality    analyzer ε 0.1 (crunchy) .. 0.001 (max)
+ *   P5 Quality    analyzer ε 0.03 (crunchy) .. 0.001 (max)
  *   P6 Feedback   0 .. 1.5 — wet → sinc sat → SVF bandpass → back into the recorder
  *
  * Buttons (panel-final): B1 = PAGE, B2 = SLICE, B3 = PAGE.
@@ -24,18 +24,26 @@
  * next press of the same button advances within the group.
  *
  *   Depth:     pot i = bipolar depth (−1..+1) for pot i's modulation.
- *   Routing:   pot i = 3-zone source selector — input follower (orange) / output
- *              follower (blue, default) / CV IN (violet), zone-granular catch.
+ *   Routing:   pot i = 3-zone source selector — input follower (orange, default)
+ *              / output follower (blue) / CV IN (violet), zone-granular catch.
  *   Secondary: envelope smoothing, fade time, keyframe drive, drive
  *              character, MIX dry/wet, feedback bandpass — each with its own
  *              pot-catch.
  *
  * Routing zones and secondary norms both ride the preset store.
  *
- * B2 held 1.5 s saves everything as the boot state (QSPI slot 0); the press
- * still slices. B1+B3 held 0.5 s resets the CURRENT view to factory defaults
- * (stored values only — the save is untouched). Both confirm with a triple
- * dark blink.
+ * B1+B2 held 0.33 s saves everything as the boot state (QSPI slot 0); B1+B3 held
+ * 0.5 s resets the CURRENT view to factory defaults. Both confirm with a triple
+ * dark blink. B2 alone is the ping-pong gesture, so the two never collide.
+ *
+ * B2 held is the PING-PONG gesture on P1/P2: the rate pins where it is and the
+ * knob becomes a direction control — nudge it either way to flip polarity at
+ * that same rate. Release and the knob is page-switched, inert behind a catch
+ * pip until the pot is swept through it. The press still slices.
+ *
+ * B1+B3 held 0.5 s resets the CURRENT view to factory defaults, confirmed with
+ * a triple dark blink.
+ *
  *
  * Panel jacks (2×5, panel-final names, code indices in parens):
  *   INL   TRIG IN (cv[0])   TRIG 1·slice (jacks[2])   TRIG 2·out-event (jacks[4])   OUTL
@@ -55,6 +63,7 @@
 
 #include "alchemy/control/pot_catch.h"       /* PotState, InitCatch, UpdateCatch */
 #include "alchemy/led/anims/fill.h"
+#include "alchemy/led/ring_frame.h"
 #include "alchemy/host_link/component_writer.h"
 #include "alchemy/host_link/host.h"
 #include "alchemy/hw/alchemy_lab_v2.h"
@@ -213,24 +222,165 @@ static ModRouter modRouter;
 
 /* ── Page 0 — performance knobs ──────────────────────────────────────── */
 
+static constexpr float kPitchMax    = 2.0f;    // speed at either stop
+static constexpr float kPitchDetent = 0.03f;   // ±0.03x holds each unity
+
+/* ── Ping-pong gesture, shared by Pitch and Stretch ───────────────────────
+ * Hold B2 (or a high TRIG IN gate) and the knob stops being a value and becomes
+ * a DIRECTION control: the magnitude pins where it was, and the MOMENTUM of the
+ * knob sets polarity — nudge it toward negative and playback flips to reverse at
+ * that same rate, nudge back toward positive and it flips forward. Release and
+ * the knob is page-switched: inert, showing a catch pip, until the pot is swept
+ * through the value the gesture left behind. Same PotState the Pager uses, so
+ * the pip means exactly what it means everywhere else.
+ *
+ * Momentum is measured on the MODULATED value, so a CV riding the knob flips
+ * polarity too — an LFO into P1 while B2 is held is automatic ping-pong at the
+ * LFO's rate.
+ *
+ * B2 is the only hold source. A sustained TRIG IN gate was tried as a second
+ * one and taken out: a long gate then made both knobs inert for value, which is
+ * the wrong thing to happen to a patch that just uses long gates.
+ *
+ * One struct per knob; the magnitude map and its inverse are passed in, since
+ * Pitch and Stretch taper differently. */
+static constexpr float kGestureNudge = 0.015f;   // 1.5% of sweep counts as a move
+
+struct GestureKnob
+{
+    PotState catchState;
+    bool     b2Prev      = false;
+    bool     latchRev    = false;   // polarity the momentum has latched
+    float    ref         = 0.75f;   // pot position the nudge is measured from
+    float    frozenMag   = 1.0f;
+    float    liveMag     = 1.0f;    // magnitude to play this frame
+    float    heldNorm    = 0.75f;   // live gesture value; becomes the catch target
+    float    displayNorm = 0.75f;   // what the arc draws
+};
+
+static GestureKnob pitchG, stretchG;
+
+/* Returns the effective norm to use this frame. `magFn` maps norm -> magnitude,
+ * `normFn` inverts it back onto a chosen side. */
+static float GestureNorm(GestureKnob& g, float n, float phys, bool held,
+                         float (*magFn)(float), float (*normFn)(float, bool))
+{
+    float eff;
+    if (held)
+    {
+        if (!g.b2Prev)                       // gesture opens: pin rate and side
+        {
+            /* From what is PLAYING, not from the knob. After a release while
+             * flipped the pot still sits on the old side, so seeding from it
+             * would snap polarity back the instant B2 is pressed again.
+             * displayNorm is last frame's effective value — exactly right
+             * whether the knob is caught or still decoupled. */
+            const float cur = g.displayNorm;
+            g.frozenMag = magFn(cur);
+            g.latchRev  = (cur < 0.5f);
+            g.ref       = n;                 // momentum is still measured on the knob
+        }
+        if (n < g.ref - kGestureNudge)        { g.latchRev = true;  g.ref = n; }
+        else if (n > g.ref + kGestureNudge)   { g.latchRev = false; g.ref = n; }
+        g.heldNorm = normFn(g.frozenMag, g.latchRev);
+        g.liveMag  = g.frozenMag;        // exact — no norm round trip
+        eff = g.heldNorm;
+    }
+    else
+    {
+        if (g.b2Prev)                       // just released: decouple
+        {
+            g.catchState.stored = g.heldNorm;
+            InitCatch(g.catchState, phys);
+        }
+        UpdateCatch(g.catchState, phys);
+        eff = g.catchState.stored + (n - phys);   // modulation still rides on top
+        if (eff < 0.0f) eff = 0.0f; else if (eff > 1.0f) eff = 1.0f;
+        g.liveMag = magFn(eff);
+    }
+    g.b2Prev      = held;
+    g.displayNorm = eff;
+    return eff;
+}
+
+/* Bipolar ring drawn from the gesture's value rather than the pot, so a latched
+ * knob shows what it is actually playing: the arc keeps its length and jumps
+ * across noon the instant the pot crosses. Everything else is the SDK's own
+ * rendering — FillMode::Center is the same bipolar fill ArcStyle::Bipolar uses
+ * (including its LED-step snapping), and the Emit overload paints the standard
+ * catch pip on top, so a decoupled P1/P2 reads exactly like a decoupled knob
+ * anywhere else. PerfRenderer skips Custom rings entirely, which is why the pip
+ * has to be asked for here. */
+static void DrawGestureRing(LedPanel& panel, uint8_t pot, const ArcGeometry& arc,
+                            float, uint32_t t_ms, void* ctx)
+{
+    const GestureKnob& g = *static_cast<const GestureKnob*>(ctx);
+
+    /* PerfRenderer dims an uncaught arc to 30%; a Custom ring has to do that
+     * itself or a decoupled P1/P2 would look live when every other knob dims. */
+    const float k = g.catchState.caught ? 1.0f : 0.30f;
+
+    FillDesc desc;
+    desc.mode         = FillMode::Center;
+    desc.color        = LedPanel::Scale(kOrange, k);   // forward
+    desc.neg_color    = LedPanel::Scale(kBlue,   k);   // reverse
+    desc.center_color = LedPanel::Scale(kCenter, k);
+
+    RingFrame f;
+    f.Begin(arc);
+    f.Base(desc, g.displayNorm, t_ms);
+    f.Emit(panel, pot, g.catchState);
+}
+
 VirtualKnob pitch = VirtualKnob(0, "Pitch")
     .Ident("perf.pitch")
-    .Unit("st")
-    .Linear(-12.f, +12.f)
-    .Ring(Bipolar(kOrange, kBlue, kCenter));   // up = orange (page hue), down = blue
+    .Unit("x")
+    .Linear(-kPitchMax, +kPitchMax)
+    .Ring(Custom(DrawGestureRing, &pitchG));   // gesture-aware bipolar arc
+
+/* Pitch is playback speed, linear: noon stops the head, the stops are ±2x,
+ * unity sits at ¼ and ¾. Below noon the grains play backward. A detent holds
+ * each unity; noon has none — near-zero is just slow. */
+static float PitchMag(float n)
+{
+    if (n < 0.0f) n = 0.0f; else if (n > 1.0f) n = 1.0f;
+    const float m = std::fabs(2.0f * n - 1.0f) * kPitchMax;
+    return (std::fabs(m - 1.0f) < kPitchDetent) ? 1.0f : m;
+}
+
+static float PitchNormFor(float mag, bool rev)
+{
+    float a = mag / kPitchMax;
+    if (a > 1.0f) a = 1.0f;
+    return rev ? (0.5f - 0.5f * a) : (0.5f + 0.5f * a);
+}
 
 VirtualKnob stretch = VirtualKnob(1, "Stretch")
     .Ident("perf.stretch")
     .Linear(0.0f, 1.0f)
-    .Ring(Level(kOrange));
+    .Ring(Custom(DrawGestureRing, &stretchG));  // gesture-aware bipolar arc
 
-/* Stretch taper: 1.0 (realtime) → 0 (frozen) at the CW stop. Linear gave 2x at
- * noon and dumped all the range into the last few percent; exp was too steep at
- * the top. (1-n)^2.5 lands ~5.7x at noon and reaches a true freeze. */
-static float StretchCurve(float n)
+/* Stretch taper, bipolar: a TRUE FREEZE at noon, realtime forward at the CW
+ * stop, realtime reverse at CCW. |u|^2.5 keeps the fine resolution around
+ * freeze that the old unipolar (1-n)^2.5 gave, mirrored onto both sides — so
+ * n = 0.75 still lands ~5.7x, exactly where noon used to sit.
+ *
+ * No detent: 1% off noon is already 1e-5, half a sample per second. Freeze is
+ * an asymptote, not a hard target. */
+static float StretchMag(float n)
 {
     if (n < 0.0f) n = 0.0f; else if (n > 1.0f) n = 1.0f;
-    return std::pow(1.0f - n, 2.5f);
+    const float u = 2.0f * n - 1.0f;                // -1 .. +1, zero at noon
+    return std::pow(std::fabs(u), 2.5f);            // 0 at noon, 1 at the stops
+}
+
+/* Inverse of StretchMag onto a chosen side. The magnitude legitimately reaches
+ * zero (a true freeze), and pow handles it. */
+static float StretchNormFor(float mag, bool rev)
+{
+    float a = std::pow(mag, 1.0f / 2.5f);
+    if (a < 0.0f) a = 0.0f; else if (a > 1.0f) a = 1.0f;
+    return rev ? (0.5f - 0.5f * a) : (0.5f + 0.5f * a);
 }
 
 VirtualKnob threshold = VirtualKnob(2, "Threshold")
@@ -245,7 +395,12 @@ VirtualKnob grainSize = VirtualKnob(3, "Grain Size")
 
 VirtualKnob quality = VirtualKnob(4, "Quality")
     .Ident("perf.quality")
-    .Linear(0.1f, 0.001f)   // analyzer ε — CW = max fidelity, CCW = crunchy
+    /* ε 0.03..0.001. The old CCW end was 0.1, which measured ~2.5 dB
+     * reconstruction SNR on speech — past crunchy into broken, and because the
+     * map is linear in ε it ate half the sweep. 0.03 measures ~13.3 dB against
+     * 17.1 at the CW end, so the whole travel is now usable and reads roughly
+     * evenly in dB. */
+    .Linear(0.03f, 0.001f)  // analyzer ε — CW = max fidelity, CCW = crunchy
     /* The host would otherwise render the raw epsilon as a backwards
      * "0.1 .. 0.001" sweep; fidelity percent is what the knob means. */
     .Disp("{\"kind\":\"norm\"}")
@@ -406,34 +561,35 @@ static ControlLoop loop  (hw);
 static Pager       pager (hw.buttons[0], 2, NUM_POTS);   // B1: perf ↔ depth
 
 /* Startup settings = preset slot 0. The Pager is the only managed component —
- * its stored knob values are the module's settings. BootLoad() at startup; hold
- * B1+B2 kSaveHoldMs to overwrite (see OnPoll). */
+ * its stored knob values are the module's settings. BootLoad() at startup;
+ * hold B1+B2 kSaveHoldMs to overwrite (see OnPoll). */
 static Presets presets(hw.seed.qspi);
 
 #ifndef CAPICOLA_BENCH_LOG
 /* Browser/CLI preset editor over the front-panel USB CDC (SDK default
  * transport). Identity strings are literals — kept by reference. */
 hostlink::Host host(presets, "capicola", "Capicola",
-                           "0.3.0", CAPICOLA_GIT_HASH);
+                           "1.0.0", CAPICOLA_GIT_HASH);
 
 /* src/capicola_manual.cpp — attaches the firmware-authored manual (prose,
  * jacks, buttons) to the descriptor. Called before BootLoad() brings USB up. */
 void DescribeManual(hostlink::Host& host);
 #endif
 
-static constexpr uint32_t kSaveHoldMs  = 1500;
+static constexpr uint32_t kSaveHoldMs  = 330;
 static constexpr uint32_t kResetHoldMs = 500;    // B1+B3: reset current page
 static constexpr uint32_t kSaveFlashMs  = 600;   // 3 dark pulses at kSaveBlinkMs
 static constexpr uint32_t kSaveBlinkMs  = 100;
 static uint32_t saveFlashMs = 0;   // 0 = never; set on save/reset commit
 
+
 /* Factory defaults (stored norms) — seeded at boot AND restored per-page by the
  * B1+B3 hold. One table so the two can never drift apart. (Routing zones default
  * to the input follower in RoutingStore's own initializer.) */
 static constexpr float kPageDefaults[2][NUM_POTS] = {
-    /* perf: pitch unity, stretch ~6x, threshold mid, grain, quality max,
-     * feedback off. */
-    {0.5f, 0.5f, 0.5f, 0.3f, 1.0f, 0.0f},
+    /* perf: pitch unity forward, stretch ~6x forward, threshold mid, grain,
+     * quality max, feedback off. */
+    {0.75f, 0.75f, 0.5f, 0.3f, 1.0f, 0.0f},
     /* depths: noon = off */
     {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
 };
@@ -590,9 +746,8 @@ static void DrawSecondaryRings(uint32_t t_ms)
 
 /* ── Frame hooks ─────────────────────────────────────────────────────── */
 
-/* B3 press bookkeeping (written by OnPoll at 1 ms cadence, read by OnFrame /
- * OnRender). SHIFT arms only after a hold — clean taps belong to the routing
- * view gesture (double-tap in, single-tap out). */
+/* B3 press bookkeeping, written by OnPoll at 1 ms cadence and read by OnFrame /
+ * OnRender. */
 static bool b1Chorded = false;   // another button joined while down → not a page press
 static bool b3Chorded = false;
 
@@ -654,21 +809,28 @@ static void OnFrame()
         prevPage   = b3Page;
     }
 
-    /* Pitch detent: within ±0.2 st of noon the transform snaps to exactly 0 —
-     * true unity is reachable by hand (the shift stepper stays the precise
-     * route to any integer semitone). Applied after modulation, so a CV
-     * wobbling inside the detent also reads as unity. */
+    /* Pitch carries the same B2 gesture as Stretch. Value() is the modulated
+     * speed; the gesture works in norms, and the map is linear, so convert. */
     {
-        float pv = pitch.Value();               // semitones (stepper adjusts the stored)
-        if (pv > -0.2f && pv < 0.2f)
-            pv = 0.0f;
-        engine.SetSlicePitch(pv);
+        const bool  held = hw.buttons[1].Pressed() && !hw.buttons[0].Pressed();
+        const float n    = (pitch.Value() + kPitchMax) / (2.0f * kPitchMax);
+        const float eff  = GestureNorm(pitchG, n, loop.Phys()[0],
+                                       held, PitchMag, PitchNormFor);
+        engine.SetSlicePitch((eff < 0.5f) ? -pitchG.liveMag : pitchG.liveMag);
     }
 
     /* Secondary page open: skip the primaries so the two layers don't fight. */
     if (!SecondaryOpen())
     {
-        engine.SetSliceStretch(StretchCurve(stretch.Value()));
+        /* P2 carries the same B2 gesture as P1: hold to flip the grid's
+         * direction at a constant stretch, release and the knob is page-
+         * switched until its catch pip is consumed. */
+        {
+            const bool  held = hw.buttons[1].Pressed() && !hw.buttons[0].Pressed();
+            const float eff  = GestureNorm(stretchG, stretch.Value(), loop.Phys()[1],
+                                           held, StretchMag, StretchNormFor);
+            engine.SetSliceStretch((eff < 0.5f) ? -stretchG.liveMag : stretchG.liveMag);
+        }
         /* P3 piecewise: 0..90% of the sweep is ratio 0..4 over the envelope
          * average, the last 10% climbs 4..8; the very top hard-mutes auto
          * triggers (sentinel trips Detector::kMuteAt). B1 still works. */
@@ -736,11 +898,15 @@ static uint32_t sliceFlashMs = 0;   // last button-originated trigger
 
 static void OnPoll(uint32_t t_ms)
 {
-    /* B2 held kSaveHoldMs = save current settings as the startup defaults
-     * (slot 0). The press still slices on its rising edge. */
+    /* B1+B2 held kSaveHoldMs = save everything (all four pages) as the boot
+     * state, QSPI slot 0. Mirrors B1+B3 = reset, and leaves B2 alone to the
+     * ping-pong gesture — the two are mutually exclusive, so a save can never
+     * flip a polarity on the way past. B2's press still slices going down. */
     static uint32_t saveHoldMs = 0;
-    if (hw.buttons[1].Pressed())
+    if (hw.buttons[0].Pressed() && hw.buttons[1].Pressed()
+        && !hw.buttons[2].Pressed())
     {
+        pager.ConsumeButton();   // B1 is the pager now — eat its release
         if (++saveHoldMs == kSaveHoldMs)
         {
             presets.Save(0);
@@ -957,8 +1123,8 @@ int main(void) {
         for (uint8_t p = 0; p < NUM_POTS; p++)
             pager.SetStored(pg, p, kPageDefaults[pg][p], phys);
 
-    /* Shift-secondary bank: park each at its default (= the engine's boot value),
-     * caught, so the first shift session shows the live setting. */
+    /* Secondary bank: park each at its default (= the engine's boot value),
+     * caught, so the first visit to the page shows the live setting. */
     for (uint8_t p = 0; p < NUM_POTS; p++)
         secState[p].stored = kSecDefault[p];
 

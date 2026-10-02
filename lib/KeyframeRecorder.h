@@ -118,8 +118,34 @@ private:
     void Punch() {
         liveG ^= 1;
         granule[liveG].Retrigger();
+        granule[liveG].SetPitch(curPitch);
         xGain = 0.0f;
         xStep = 1.0f / ((curFade < 1.0f) ? 1.0f : curFade);
+    }
+
+    // Direction change. Reversing a moving head in place is a corner in the
+    // waveform, so the idle grain takes a copy of the live one — same cursors,
+    // same in-flight splice — and plays on in the new direction while the old
+    // one fades out in the old. Same ramp as a punch, and the same refractory,
+    // so a transient can't punch into it.
+    void Flip() {
+        granule[liveG ^ 1] = granule[liveG];
+        liveG ^= 1;
+        xGain    = 0.0f;
+        xStep    = 1.0f / ((curFade < 1.0f) ? 1.0f : curFade);
+        trigGate = curFade;
+    }
+
+    // Once per block, after any punch: only the live grain follows the knob;
+    // the outgoing one finishes its ramp at the rate it had. A sign change
+    // trades grains, and waits for a running ramp to land rather than reuse a
+    // grain that is still audible.
+    void TrackPitch() {
+        if ((curPitch < 0.0f) != (granule[liveG].GetPitch() < 0.0f)) {
+            if (xGain < 1.0f) return;
+            Flip();
+        }
+        granule[liveG].SetPitch(curPitch);
     }
 
     // Mixed read of the trading pair; the retired grain is skipped once the ramp
@@ -171,7 +197,7 @@ public:
         trigGate       = 0.0f;
     }
 
-    void SetGrainPitch(float s)   { curPitch = s; for (auto& g : granule) g.SetPitch(s); }
+    void SetGrainPitch(float s)   { curPitch = s; }   // signed; applied per block (TrackPitch)
     void SetGrainStretch(float t) { curStretch = t; for (auto& g : granule) g.SetStretch(t); }
     void SetGrainLeash(int k)     { curLeash = k; for (auto& g : granule) g.SetLeash(k); }
     void SetThreshold(float v)    { curThreshold = v; analyzer.SetThreshold(v); }
@@ -272,6 +298,7 @@ public:
                 granule[0].BeginBlock((int)size);
                 granule[1].BeginBlock((int)size);
                 if (pendingSeed) { Punch(); pendingSeed = false; }
+                TrackPitch();
                 for (size_t i = 0; i < size; i++) out[i] = ReadPair();
                 break;
             }
@@ -301,6 +328,7 @@ public:
                 granule[0].BeginBlock((int)size);
                 granule[1].BeginBlock((int)size);
                 if (pendingSeed) { Punch(); pendingSeed = false; }
+                TrackPitch();
                 for (size_t i = 0; i < size; i++) out[i] = ReadPair();
 
                 // Gap-gated boundary keyframe. Safe because every reader fence
