@@ -23,6 +23,8 @@
 #include "alchemy/surface/virtual_button.h"
 #include "alchemy/surface/virtual_knob.h"
 
+#include "capicola_manual_text.h"   /* every word below — generated from docs/manual.html */
+
 using namespace alchemy;
 
 /* Declared in main.cpp — the perf page, the depth page, and the host. */
@@ -54,33 +56,35 @@ static VirtualButton b1 = VirtualButton(kButtonB1, "B1")
     .Role(VirtualButton::Role::Modal)
     .Action("click", "Primary / Depth")
     .Action("hold-b1-b2", "Save boot state")
-    .Action("hold-b1-b3", "Reset visible page");
+    .Action("hold-b1-b3", "Factory reset, all pages");
 
 static VirtualButton b2 = VirtualButton(kButtonB2, "B2")
     .Ident("b2")
     .Role(VirtualButton::Role::Modal)
     .Action("press", "Slice")
-    .Action("hold", "Ping-pong: flip P1/P2 direction");
+    .Action("hold", "Polarity flip: P1/P2 direction")
+    .Action("hold-b2-b3", "Load boot state");
 
 static VirtualButton b3 = VirtualButton(kButtonB3, "B3")
     .Ident("b3")
     .Role(VirtualButton::Role::Modal)
-    .Action("click", "Routing / Secondary");
+    .Action("click", "Routing / Secondary")
+    .Action("hold", "Shift: snap knobs to their target");
 
 /* ── Routing-page fields ──────────────────────────────────────────────────
  * RoutingStore (main.cpp) emits these as enum fields; the words live here
  * with the rest of the manual. Zone order matches kSrcColors / ZoneOf(). */
 
 extern const char* const kRouteDispJson =
-    "{\"kind\":\"enum\",\"labels\":[\"In Env\",\"Out Env\",\"CV In\"]}";
+    "{\"kind\":\"enum\",\"labels\":[\"In Env\",\"Out Env\",\"CV In\",\"CV 2\",\"CV 3\"]}";
 
 extern const char* const kRouteFieldId[6] = {
     "route.p1", "route.p2", "route.p3", "route.p4", "route.p5", "route.p6",
 };
 
 extern const char* const kRouteFieldName[6] = {
-    "P1 Source", "P2 Source", "P3 Source",
-    "P4 Source", "P5 Source", "P6 Source",
+    manual_text::kRouteName[0], manual_text::kRouteName[1], manual_text::kRouteName[2],
+    manual_text::kRouteName[3], manual_text::kRouteName[4], manual_text::kRouteName[5],
 };
 
 extern const VirtualKnob* const kRouteSeeKnob[6] = {
@@ -88,14 +92,8 @@ extern const VirtualKnob* const kRouteSeeKnob[6] = {
 };
 
 extern const char* const kRouteFieldHelp[6] = {
-    "Source for **Pitch**.",
-    "Source for **Stretch**.",
-    "Source for **Threshold** — a follower steering the detector's own "
-    "threshold is where the module starts breathing.",
-    "Source for **Grain Size**.",
-    "Source for **Quality**.",
-    "Source for **Feedback**. The output follower acts as a governor here: "
-    "the louder it gets, the further the loop gain can go before it runs.",
+    manual_text::kRouteHelp[0], manual_text::kRouteHelp[1], manual_text::kRouteHelp[2],
+    manual_text::kRouteHelp[3], manual_text::kRouteHelp[4], manual_text::kRouteHelp[5],
 };
 
 /* ── Secondary-page fields ────────────────────────────────────────────────
@@ -109,7 +107,8 @@ extern const char* const kSecFieldId[6] = {
 };
 
 extern const char* const kSecFieldName[6] = {
-    "Smoothing", "Fade", "Drive", "Character", "Mix", "FB Tone",
+    manual_text::kSecName[0], manual_text::kSecName[1], manual_text::kSecName[2],
+    manual_text::kSecName[3], manual_text::kSecName[4], manual_text::kSecName[5],
 };
 
 extern const char* const kSecFieldDisp[6] = {
@@ -122,77 +121,48 @@ extern const char* const kSecFieldDisp[6] = {
 };
 
 extern const char* const kSecFieldHelp[6] = {
-    "Cutoff of the follower both envelopes run through. Low pass filters "
-    "the signal before detection.",
-
-    "Real time latency, and button triggered slice duration. Longer times "
-    "means more latency with longer crossfades on button press.",
-
-    "Gain into the keyframe shaper. Applied to the keyframes themselves to "
-    "reduce aliasing.",
-
-    "Tape-like dropout saturation curve to clean to wobbly boost saturator. "
-    "The tape saturator reduces the volume of low amplitude signals, the "
-    "boost saturator boosts them.",
-
-    "Dry/wet mix.",
-
-    "Bandpass centre inside the feedback loop. Affects the tonality of the "
-    "feedback.",
+    manual_text::kSecHelp[0], manual_text::kSecHelp[1], manual_text::kSecHelp[2],
+    manual_text::kSecHelp[3], manual_text::kSecHelp[4], manual_text::kSecHelp[5],
 };
+
+/* ── Options (no knob — programmer only) ───────────────────────────────── */
+
+extern const char* const kOptSnapId   = "opt.snap";
+extern const char* const kOptSnapName = "Shift Snap Target";
+extern const char* const kOptSnapDisp =
+    "{\"kind\":\"enum\",\"labels\":[\"Factory\",\"Save point\"]}";
+extern const char* const kOptSnapHelp = manual_text::kSnapTarget;
+
+extern const char* const kOptJacksId   = "opt.jacks";
+extern const char* const kOptJacksName = "Trig 1 / Env 1 Jacks";
+extern const char* const kOptJacksDisp =
+    "{\"kind\":\"enum\",\"labels\":[\"Outputs\",\"CV inputs\"]}";
+extern const char* const kOptJacksHelp = manual_text::kJackMode;
+
+/* Trig 2 / Env 2 in CV-input mode. Label order = jacks::Signal. */
+extern const char* const kOptTrig2Id   = "opt.trig2";
+extern const char* const kOptTrig2Name = "Trig 2 Jack";
+extern const char* const kOptEnv2Id    = "opt.env2";
+extern const char* const kOptEnv2Name  = "Env 2 Jack";
+extern const char* const kOptOutDisp =
+    "{\"kind\":\"enum\",\"labels\":[\"Input triggers\",\"Output triggers\","
+    "\"Input envelope\",\"Output envelope\"]}";
+extern const char* const kOptOutsHelp = manual_text::kJackOuts;
 
 /* ── Module-level manual ──────────────────────────────────────────────── */
 
+/* The overviews with no entity to hang on, and the two gestures that belong
+ * to no button, ride as sections. */
 static Manual manual =
     Manual()
-        .Tagline("Transient-locked keyframe time stretcher")
-        .Preamble(
-            "Incoming stereo is stretched, and in parallel its envelope and "
-            "transients are extracted. When a transient passes the "
-            "threshold, the lagging read head snaps to the current time "
-            "with a short crossfade and stretches on from there — time "
-            "stretching that stays true to the rhythm of the input. Pitch "
-            "and time are fully decoupled.\n\n"
-            "The engine is [Keyframe Time Stretching via Extrema Sampling]"
-            "(https://github.com/heavylight-industries/dafx26-paper), "
-            "DAFx26.")
-        .Section("getting-around", "Getting Around",
-                 "Four pages in two groups. **B1** walks Primary → Depth, "
-                 "**B3** walks Routing → Secondary. Each group remembers "
-                 "where it was left, so the other group's button jumps back "
-                 "to where you were.\n\n"
-                 "Every page stores its own value per knob. After a page "
-                 "switch a knob stays decoupled until the pot sweeps "
-                 "through the stored value — the ring shows a pip there — "
-                 "then it catches. Nothing jumps. Routing catches per zone.")
-        .Section("routing", "Routing",
-                 "Each pot picks the modulation source for the "
-                 "same-numbered Primary knob, CCW → CW: input follower, "
-                 "output follower, CV In. The ring shows all three zones "
-                 "dim with the selected one lit, so it doubles as the "
-                 "position map.\n\n"
-                 "The default is the input follower, so the module "
-                 "self-patches out of the box: every performance control is "
-                 "normalized to the envelope followers, and the dynamics of "
-                 "the signal modulate them in real time. The output "
-                 "follower is the wilder option — it hears what the module "
-                 "is already doing, so depth alone closes a loop.\n\n"
-                 "Both followers are the detectors' own smoothed TKEO "
-                 "envelopes — input side is max of L/R, output side runs on "
-                 "the post-mix sum. The output follower never triggers a "
-                 "slice; it is a signal source only.")
-        .Section("panel", "Reading the Panel",
-                 "All three buttons wear the visible page's hue and are "
-                 "never off, so activity reads as a **dark flash**: B2 "
-                 "blinks off on a slice, and all three blink three times to "
-                 "confirm a settings save or a page reset.\n\n"
-                 "The pip at six o'clock on **P3**–**P6** mirrors the four "
-                 "CV outputs — Trig 1, Trig 2, Env 1, Env 2. Env 1 turns "
-                 "red when the input clips.")
-        .PresetsHelp(
-            "Slot 0 is the boot state: **B1+B2** held writes it, and the "
-            "module loads it at power-up. The remaining slots are read and "
-            "written from the programmer.");
+        .Tagline(manual_text::kTagline)
+        .Preamble(manual_text::kPreamble)
+        .Section("routing",   "Routing",   manual_text::kRoutingOverview)
+        .Section("secondary", "Secondary", manual_text::kSecondaryOverview)
+        .Section("gestures",  "Gestures",  manual_text::kGesturesOverview)
+        .Section("catch",     "Pot Catch", manual_text::kPotCatch)
+        .Section("slicing",   "Slicing",   manual_text::kSlicing)
+        .PresetsHelp(manual_text::kHistory);
 
 /* ── Entity prose ─────────────────────────────────────────────────────── */
 
@@ -201,94 +171,50 @@ static Manual manual =
  * descriptor build — without linking the USB stack. */
 void AttachManualHelp()
 {
-    perfPage.Help(
-        "The six knobs you play. Depth for each lives on the Depth page, "
-        "source on the Routing page.");
-    depthPage.Help(
-        "Bipolar depth for the same-numbered Primary knob; noon is off. "
-        "Applied to the knob's *position*, so a modulated knob keeps its "
-        "own taper and endpoints.");
+    using namespace manual_text;
 
-    pitch.Help("Grain playback speed, decoupled from time, and bipolar: CW "
-               "of noon the grains play **forward**, CCW they play "
-               "**backward**, up to 2x either way. Noon stops the head; a "
-               "detent holds unity on each side.")
-        .SeeAlso(stretch, cvDepth1);
-    stretch.Help("Playback rate of the keyframe grid, bipolar. **True freeze "
-                 "at noon** — the grid stops rather than crawling. CW runs "
-                 "forward to realtime, CCW runs the grid **backward** to "
-                 "realtime reverse. Triggers re-anchor it to now from either "
-                 "direction, so reverse always has somewhere to snap back to.")
-        .SeeAlso(pitch, cvDepth2);
-    threshold.Help("Self-calibrating: events are kept at `knob × running "
-                   "average` of the detector's own envelope. **The top of the knob mutes "
-                   "auto-triggering** — only B2 or Trig In slices.")
-        .SeeAlso(trig_in, b2);
-    grainSize.Help("How much keyframe material a grain covers before the "
-                   "head is sliced on.");
-    quality.Help("Analyzer keyframe threshold. CW is full fidelity; CCW "
-                 "drops keyframes for a sparse, crunchy reconstruction. Lower "
-                 "quality = longer buffer.");
-    feedback.Help("Loop gain. Wet output → sinc saturator → bandpass → back "
-                  "into the recorder, where it is re-sliced and re-pitched. "
-                  "**Above unity is deliberately unstable.** The tap sits "
-                  "before the mix blend, so Mix down does not starve it.")
-        .SeeAlso(threshold);
+    perfPage.Help(kPrimaryPage);
+    depthPage.Help(kDepthPage);
 
-    cvDepth1.Help("Depth for **Pitch**.").SeeAlso(pitch);
-    cvDepth2.Help("Depth for **Stretch**.").SeeAlso(stretch);
-    cvDepth3.Help("Depth for **Threshold**.").SeeAlso(threshold);
-    cvDepth4.Help("Depth for **Grain Size**.").SeeAlso(grainSize);
-    cvDepth5.Help("Depth for **Quality**.").SeeAlso(quality);
-    cvDepth6.Help("Depth for **Feedback**.").SeeAlso(feedback);
+    pitch    .Help(kPrimaryKnob[0]).SeeAlso(stretch, cvDepth1);
+    stretch  .Help(kPrimaryKnob[1]).SeeAlso(pitch, cvDepth2);
+    threshold.Help(kPrimaryKnob[2]).SeeAlso(trig_in, b2);
+    grainSize.Help(kPrimaryKnob[3]).SeeAlso(quality);
+    quality  .Help(kPrimaryKnob[4]).SeeAlso(grainSize, stretch);
+    feedback .Help(kPrimaryKnob[5]).SeeAlso(threshold);
 
-    in_l.Help("Left input. The two channels are detected and sliced "
-              "independently.");
-    in_r.Help("Right input.");
-    trig_in.Help("External slice trigger. Rising edge, always accepted — "
-                 "even at threshold mute.")
-        .SeeAlso(threshold, b2);
-    cv_in.Help("External modulation source, routable to any Primary knob "
-               "from the Routing page. The only bipolar source of the "
-               "three.");
-    trig_1.Help("A 10 ms pulse on every slice the engine takes — detected "
-                "transients, B2 presses and TRIG IN edges alike. Never faster "
-                "than the 150 ms hold-off, and a long fade thins it further.")
-        .SeeAlso(threshold, b2);
-    trig_2.Help("A 10 ms pulse on each of the output follower's kept "
-                "transients. Same 150 ms hold-off; never splices anything.");
-    env_1.Help("Input follower envelope, mirrored on the P5 pip.");
-    env_2.Help("Output follower envelope, mirrored on the P6 pip.");
-    out_l.Help("Left output, post-mix.");
-    out_r.Help("Right output, post-mix.");
+    VirtualKnob* const depth[6] = {&cvDepth1, &cvDepth2, &cvDepth3,
+                                   &cvDepth4, &cvDepth5, &cvDepth6};
+    VirtualKnob* const target[6] = {&pitch, &stretch, &threshold,
+                                    &grainSize, &quality, &feedback};
+    for (int p = 0; p < 6; p++)
+        depth[p]->Help(kDepthKnob[p]).SeeAlso(*target[p]);
 
-    b1.Help("Rotates between the two primary pages (warm colors).")
-        .GestureHelp("click",
-                     "Steps Primary → Depth, or returns to where the group "
-                     "was left.")
-        .GestureHelp("hold-b1-b2",
-                     "With B2, a third of a second: saves all four pages as "
-                     "the boot state. B2 alone is the ping-pong gesture, so "
-                     "holding B1 keeps a knob nudge from flipping anything.")
-        .GestureHelp("hold-b1-b3",
-                     "With B3, half a second: resets the visible page to "
-                     "factory defaults.")
+    /* kJack is in panel grid order: top row L→R, then the bottom row. */
+    in_l   .Help(kJack[0]);
+    trig_in.Help(kJack[1]).SeeAlso(threshold, b2);
+    trig_1 .Help(kJack[2]).SeeAlso(threshold, b2);
+    trig_2 .Help(kJack[3]);
+    out_l  .Help(kJack[4]);
+    in_r   .Help(kJack[5]);
+    cv_in  .Help(kJack[6]);
+    env_1  .Help(kJack[7]);
+    env_2  .Help(kJack[8]);
+    out_r  .Help(kJack[9]);
+
+    b1.Help(kButton[0])
+        .GestureHelp("click", kButtonTap[0])
+        .GestureHelp("hold-b1-b2", kGestureSave)
+        .GestureHelp("hold-b1-b3", kGestureReset)
         .SeeAlso(b3);
-    b2.Help("Slice, and flip playback direction.")
-        .GestureHelp("press",
-                     "Fires a slice, jumping the read head to the current "
-                     "time.")
-        .GestureHelp("hold",
-                     "Ping-pong: Pitch and Stretch pin their rate and become "
-                     "direction controls — nudge either knob to flip its "
-                     "direction without the rate moving. Release and the knob "
-                     "waits behind a catch pip. The press still slices on the "
-                     "way down.")
+    b2.Help(kButton[1])
+        .GestureHelp("press", kButtonTap[1])
+        .GestureHelp("hold", kGestureFlip)
+        .GestureHelp("hold-b2-b3", kGestureLoad)
         .SeeAlso(threshold, trig_in);
-    b3.Help("Rotates between the two secondary pages (cool colors).")
-        .GestureHelp("click",
-                     "Steps Routing → Secondary, or returns to where the "
-                     "group was left.")
+    b3.Help(kButton[2])
+        .GestureHelp("click", kButtonTap[2])
+        .GestureHelp("hold", kGestureSnap)
         .SeeAlso(b1);
 }
 

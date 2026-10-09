@@ -1,4 +1,11 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Capicola — Panel Manual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400&display=swap" rel="stylesheet">
 <style>
   :root {
     --ground:  #0f1114;
@@ -8,11 +15,8 @@
     --text:    #e7eaef;
     --muted:   #99a1ad;
     --faint:   #5c6470;
-    --blue:    #1e6eff;
     --ice:     #96d2ff;
     --orange:  #ff6e0f;
-    --violet:  #a028ff;
-    --pink:    #ff3c96;
     --silk:    #c6cad1;
     --window:  #45483a;
     --plate:   #1a1913;
@@ -28,11 +32,11 @@
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 32px 24px 80px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 24px 80px; }
 
   header.mast {
     display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px;
-    padding-bottom: 18px; border-bottom: 1px solid var(--line); margin-bottom: 26px;
+    padding-bottom: 18px; border-bottom: 1px solid var(--line); margin-bottom: 18px;
   }
   .mast h1 {
     font-family: var(--mono); font-size: 22px; font-weight: 700;
@@ -41,12 +45,13 @@
   .mast h1 span { color: var(--silk); }
   .mast .sub { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em;
     text-transform: uppercase; color: var(--muted); }
-  .mast .draft {
+  .mast .fw {
     margin-left: auto; font-family: var(--mono); font-size: 10px;
-    letter-spacing: 0.1em; text-transform: uppercase; color: var(--orange);
-    border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent);
-    border-radius: 3px; padding: 3px 8px; white-space: nowrap;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 3px; padding: 3px 8px; white-space: nowrap;
   }
+  p.preamble { color: var(--muted); font-size: 14px; max-width: 82ch; margin: 0 0 22px; }
+  p.preamble strong { color: var(--text); font-weight: 600; }
 
   nav.views { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
   nav.views button {
@@ -58,91 +63,147 @@
   nav.views button:hover { color: var(--text); }
   nav.views button:focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
   nav.views button[aria-selected="true"] {
-    color: var(--text); border-color: var(--vc, var(--orange));
-    box-shadow: inset 0 -2px 0 var(--vc, var(--orange));
+    color: var(--text); border-color: var(--vc);
+    box-shadow: inset 0 -2px 0 var(--vc);
   }
 
-  .stage { display: grid; grid-template-columns: 370px 1fr; gap: 32px; align-items: start; }
-  @media (max-width: 880px) { .stage { grid-template-columns: 1fr; } }
-
+  /* plate | control column | detail */
+  .stage { display: grid; grid-template-columns: 320px 190px minmax(0, 1fr);
+    gap: 24px; align-items: start; }
   .plate {
-    position: sticky; top: 16px;
+    position: sticky; top: 16px; margin: 0;
     background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
     padding: 16px 16px 8px;
   }
-  @media (max-width: 880px) { .plate { position: static; max-width: 380px; margin: 0 auto; } }
   .plate svg { display: block; width: 100%; height: auto; }
   .plate .cap {
     font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
-    text-transform: uppercase; color: var(--faint); text-align: center; padding: 8px 0 6px;
+    text-transform: uppercase; color: var(--faint); text-align: center; padding: 8px 0 2px;
+  }
+  .jacks { display: none; align-items: center; justify-content: center; gap: 6px;
+    padding: 2px 0 8px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--muted); }
+  .jacks.on { display: flex; }
+  .jacks span { margin-right: 4px; }
+  .jacks button { font: inherit; letter-spacing: inherit; text-transform: inherit;
+    color: var(--muted); background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 3px; padding: 3px 8px; cursor: pointer; }
+  .jacks button[aria-pressed="true"] { color: var(--text); border-color: var(--vc); }
+  .plate .hint {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--muted); padding: 2px 0 6px;
   }
 
-  .notes h2 {
-    font-family: var(--mono); font-size: 15px; letter-spacing: 0.2em;
-    text-transform: uppercase; margin: 0 0 4px; color: var(--vc, var(--orange));
+  /* per-page knob labels in the silkscreen's own face: Antonio Regular, cap
+     height 0.86 em, so 3.174 px sets the panel's 2.73 mm caps */
+  .silk { font-family: "Antonio", "Arial Narrow", sans-serif; font-weight: 400;
+    font-size: 3.174px; fill: var(--silk); }
+  a.inl { color: var(--text); text-decoration: underline; text-decoration-color: var(--vc);
+    text-underline-offset: 2px; cursor: pointer; }
+  a.inl:hover { color: var(--vc); }
+
+  /* clickable hit targets drawn over the plate */
+  .hit { fill: transparent; pointer-events: all; cursor: pointer;
+    stroke: var(--vc); stroke-width: 0.6; stroke-opacity: 0; transition: stroke-opacity 0.12s; }
+  .hit:hover, .hit:focus-visible { stroke-opacity: 0.4; outline: none; }
+  .hit.sel { stroke-opacity: 1; }
+
+  .list h2 {
+    font-family: var(--mono); font-size: 14px; letter-spacing: 0.2em;
+    text-transform: uppercase; margin: 2px 0 6px; color: var(--vc);
   }
   .gesture {
-    display: inline-block; font-family: var(--mono); font-size: 10.5px;
-    letter-spacing: 0.1em; text-transform: uppercase; color: var(--text);
+    display: inline-block; font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);
     background: var(--panel2); border: 1px solid var(--line); border-radius: 3px;
-    padding: 3px 9px; margin: 4px 0 14px;
+    padding: 2px 8px; margin: 0 0 14px;
   }
-  .notes p.lede { margin: 0 0 18px; color: var(--muted); max-width: 58ch; }
-  .notes p.lede strong { color: var(--text); font-weight: 600; }
-
-  table.knobs { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-  table.knobs td {
-    padding: 9px 10px 9px 0; border-top: 1px solid var(--line);
-    vertical-align: baseline; font-size: 13.5px;
+  .list ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+  .list li { border-bottom: 1px solid var(--line); }
+  .ctl {
+    display: flex; gap: 10px; align-items: baseline; width: 100%;
+    background: none; border: 0; border-left: 2px solid transparent;
+    padding: 10px 10px; cursor: pointer; text-align: left;
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
   }
-  table.knobs tr:last-child td { border-bottom: 1px solid var(--line); }
-  td.pn { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 34px; }
-  td.pl { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em;
-    text-transform: uppercase; white-space: nowrap; width: 158px; }
-  td.pl b { color: var(--vc, var(--text)); font-weight: 700; }
-  td.pr { color: var(--muted); font-variant-numeric: tabular-nums; }
-  td.pr em { color: var(--text); font-style: normal; }
+  .ctl .n { color: var(--faint); font-size: 10.5px; width: 20px; flex: none; }
+  .ctl:hover { color: var(--text); background: var(--panel); }
+  .ctl:focus-visible { outline: 2px solid var(--ice); outline-offset: -2px; }
+  .ctl[aria-current="true"] { color: var(--vc); background: var(--panel);
+    border-left-color: var(--vc); font-weight: 700; }
+  .ctl[aria-current="true"] .n { color: var(--vc); }
 
-  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 22px; }
+  .detail {
+    background: var(--panel); border: 1px solid var(--line);
+    border-top: 3px solid var(--vc); border-radius: 6px; padding: 20px 26px 24px;
+    min-height: 360px;
+  }
+  .detail .kicker { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--faint); }
+  .detail h3 { font-family: var(--mono); font-size: 19px; letter-spacing: 0.16em;
+    text-transform: uppercase; margin: 2px 0 16px; color: var(--vc); }
+  .detail h4 { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--text); margin: 22px 0 6px; }
+  dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px;
+    margin: 0 0 18px; padding: 12px 14px; background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 4px; font-size: 13px; }
+  dl.facts dt { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--faint); padding-top: 2px; }
+  dl.facts dd { margin: 0; color: var(--text); font-variant-numeric: tabular-nums; }
+  .detail p, .detail li { color: var(--muted); font-size: 14px; max-width: 68ch; }
+  .detail p { margin: 0 0 12px; }
+  .detail ul { padding-left: 18px; margin: 0 0 12px; }
+  .detail strong { color: var(--text); font-weight: 600; }
+  .detail code { font-family: var(--mono); font-size: 12.5px; color: var(--text); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 4px 0 16px; }
   .legend span { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
     text-transform: uppercase; color: var(--muted); display: inline-flex;
     align-items: center; gap: 7px; }
   .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block;
     box-shadow: 0 0 6px currentcolor; }
-
-  .aside {
-    border-left: 2px solid var(--line); padding: 2px 0 2px 14px;
-    color: var(--muted); font-size: 13px; max-width: 56ch; margin-bottom: 26px;
-  }
-  .aside b { color: var(--text); font-weight: 600; }
-
-  section.ref { margin-top: 44px; border-top: 1px solid var(--line); padding-top: 24px; }
-  section.ref h3 { font-family: var(--mono); font-size: 12px; letter-spacing: 0.2em;
-    text-transform: uppercase; color: var(--muted); margin: 0 0 14px; }
-  .chords { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 12px; }
-  .chord { background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
-    padding: 13px 15px; font-size: 13px; color: var(--muted); }
-  .chord .keys { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
-    color: var(--text); text-transform: uppercase; display: block; margin-bottom: 5px; }
+  .see { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 20px;
+    padding-top: 14px; border-top: 1px solid var(--line); }
+  .see span { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--faint); margin-right: 4px; }
+  .see button { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--text); background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 3px; padding: 3px 9px; cursor: pointer; }
+  .see button:hover { border-color: var(--muted); }
   kbd { font-family: var(--mono); font-size: 10.5px; background: var(--panel2);
     border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px;
     padding: 1px 6px; color: var(--text); }
+
+  @media (max-width: 1000px) {
+    .stage { grid-template-columns: 300px minmax(0, 1fr); }
+    .detail { grid-column: 1 / -1; }
+  }
+  @media (max-width: 640px) {
+    .wrap { padding: 24px 16px 60px; }
+    .stage { grid-template-columns: minmax(0, 1fr); }
+    .plate { position: static; max-width: 340px; width: 100%; margin: 0 auto; }
+    .list ul { display: grid; grid-template-columns: 1fr 1fr; }
+    .list li:first-child { grid-column: 1 / -1; }
+    .detail { padding: 18px 16px 20px; }
+  }
 </style>
 
 <div class="wrap">
   <header class="mast">
     <h1>Capicola<span>.</span></h1>
-    <div class="sub">Panel manual · Alchemy Lab V2 · 12 HP</div>
-    <div class="draft">Firmware 0.3.0</div>
+    <div class="sub" id="sub"></div>
+    <div class="fw">Firmware 1.1</div>
   </header>
+
+  <p class="preamble" id="preamble"></p>
 
   <nav class="views" role="tablist" aria-label="Panel views" id="tabs"></nav>
 
-  <div class="stage">
-    <figure class="plate" style="margin:0">
-      <svg id="panel" viewBox="8.85 11.4 64.96 132.5" role="img"
-           aria-label="Capicola faceplate — KiCad panel art with live LED state">
+  <div class="stage" id="stage">
+    <figure class="plate">
+      <svg id="panel" viewBox="8.85 11.4 64.96 132.5" role="group"
+           aria-label="Capicola faceplate — click a knob, button or jack for its details">
         <defs>
           <filter id="glow" x="-150%" y="-150%" width="400%" height="400%">
             <feGaussianBlur stdDeviation="0.7" result="b"/>
@@ -45645,35 +45706,447 @@ Z" />
           </g>
           <g id="Ldyn"></g>
         </g>
+        <g id="Lhit"></g>
       </svg>
       <figcaption class="cap" id="platecap"></figcaption>
+      <div class="hint" id="hint">Click any knob, button or jack</div>
+      <div class="jacks" id="jacks" role="group" aria-label="Trig 1 and Env 1 jacks">
+        <span>Trig 1 / Env 1</span>
+        <button data-jacks="0">Outputs</button><button data-jacks="1">CV inputs</button>
+      </div>
     </figure>
-    <div class="notes" id="notes"></div>
+    <nav class="list" id="list" aria-label="Controls"></nav>
+    <article class="detail" id="detail" aria-live="polite"></article>
   </div>
-
-  <section class="ref">
-    <h3>Chords &amp; global gestures</h3>
-    <div class="chords">
-      <div class="chord"><span class="keys"><kbd>B2</kbd> hold 1.5 s</span>
-        Save everything as the boot state (QSPI slot 0). Confirms with a triple dark blink — the press still fires its slice.</div>
-      <div class="chord"><span class="keys"><kbd>B1</kbd>+<kbd>B3</kbd> hold 0.5 s</span>
-        Reset the <em>visible page</em> to factory defaults. Stored values only — the save is untouched.</div>
-      <div class="chord"><span class="keys">Trig in · rising edge</span>
-        External slice trigger, always accepted. Shares B2's dark activity flash.</div>
-      <div class="chord"><span class="keys">Page memory</span>
-        Each group remembers its page: the other group's button jumps back to where that group was left; the same button pressed again advances.</div>
-    </div>
-  </section>
 </div>
 
-<script>
+<script id="manual-data">
+/* ─── Manual content ───────────────────────────────────────────────────
+ * Everything a reader is told lives in this block, and nothing here touches
+ * the DOM: tools/manual_sync.mjs evaluates it to generate
+ * src/capicola_manual_text.h, so the web programmer shows the same words.
+ * Prose is HTML limited to <p> <strong> <em> <code> <kbd> <sup> <h4> <ul>
+ * <li> and inline links made with L(), which the generator turns into
+ * markdown. Facts tables are page-only: the firmware states ranges and
+ * defaults from its own declarations. */
+
 /* ─── The firmware's palette (main.cpp) ─────────────────────────────── */
 const C = {
   blue:   "#1e6eff", ice: "#96d2ff", orange: "#ff6e0f",
   violet: "#a028ff", pink: "#ff3c96", teal: "#00dcc8", center: "#8a8a8a",
+  silk:   "#d6d2c4", green: "#14ff28", white: "#fff1e2",
   cap: "#26251f", capEdge: "#3a3931", pointer: "#d6d2c4", hole: "#0b0c09"
 };
 
+/* ring display specs */
+const sweep   = (f,c)   => ({t:"sweep", f, c});
+const bipolar = (f,p,n) => ({t:"bi", f, p, n});
+const zones   = (sel)   => ({t:"zones", sel});
+const flat    = ()      => ({t:"flat"});
+
+/* Inline link to another entry: a ref as in `see` lists ("perf:2", "b2",
+ * "j:1", "gestures:load", or "depth:" for a page overview). */
+const L = (ref, text) => `<a class="inl" href="#" data-link="${ref}">${text}</a>`;
+
+const TAGLINE = "Transient-locked keyframe time stretcher";
+
+/* Shared with the firmware: the presets help and the Shift Snap Target option. */
+const HISTORY = `The slots are a <strong>save history</strong>. Slot 1 is always your latest
+save, and slots 2–16 keep the fifteen before it; once they're full, each new save
+replaces the oldest. Panel saves name themselves <strong>Save 1</strong>,
+<strong>Save 2</strong> and so on, so the programmer shows their order; a name you give
+a save in the programmer is kept. Recall an older one from the web programmer: load it
+onto the module, then save from the panel to make it your latest.`;
+const SNAP_TARGET = `<strong>Shift Snap Target</strong> (web programmer, Options) picks where
+a knob snaps: <strong>Factory</strong>, or <strong>Save point</strong>, its value in your latest save (slot 1),
+so each knob toggles between where you are and where you saved. Save point falls back
+to factory while nothing is saved.`;
+
+const JACK_MODE = `Out of the box, <strong>Trig 1</strong> and <strong>Env 1</strong> are CV
+inputs, <strong>CV 2</strong> and <strong>CV 3</strong>, and every routing knob has two
+more segments for them, purple and green. Set <strong>Trig 1 / Env 1 Jacks</strong> to
+Outputs (web programmer, Options) to use them as printed. Saved with each preset.`;
+
+const JACK_OUTS = `While Trig 1 and Env 1 are inputs, <strong>Trig 2</strong> and
+<strong>Env 2</strong> each carry any of the four follower signals: input triggers (every
+slice), output triggers, the input envelope or the output envelope (web programmer,
+Options). By default they carry the input triggers and the input envelope, so nothing is
+lost. With Trig 1 / Env 1 set to Outputs, all four carry what is printed. The 6pm pips
+always show the followers, whatever the jacks carry.`;
+
+const PREAMBLE = `Incoming stereo is stretched while its envelope and transients are tracked in
+parallel. When a transient passes the threshold, the lagging read head snaps to
+the current moment with a short crossfade and stretches on from there: time
+stretching that stays locked to the rhythm of the input. <strong>Pitch and time are
+fully decoupled, and can run forwards or backwards
+independently.</strong> The engine is
+<a href="https://github.com/heavylight-industries/dafx26-paper" style="color:var(--ice)">Keyframe
+Time Stretching via Extrema Sampling</a> (DAFx26).`;
+
+/* ─── Buttons and jacks — the same on every page ────────────────────── */
+const BUTTONS = [
+  { l: "B1", kicker: "Button · page group 1",
+    facts: [["Click", "Primary ↔ Depth, on release"], ["+ B2, 0.33 s", "Save"],
+            ["+ B3, 0.5 s", "Factory reset, all pages"]],
+    body: `<p>Rotates between the two primary pages, the warm-colored ones. If the
+      module is showing a B3 page, the first press jumps back to whichever of
+      Primary or Depth you left; the next press advances.</p>
+      <p>B1 is also half of two chords: with B2 it saves, with B3 it takes every page
+      back to factory.</p>`,
+    see: ["gestures:save", "gestures:reset", "b2"] },
+  { l: "B2", kicker: "Button · slice",
+    facts: [["Tap", "Slice both channels, on release"], ["Hold 0.1 s", "Polarity flip on P1 / P2"],
+            ["+ B3, 0.5 s", "Load"], ["Light", "Blinks dark on every slice"]],
+    body: `<p><strong>Tap</strong> to fire a slice: both read heads jump to the current
+      moment with a crossfade. It fires as the button comes up, so a quick tap feels
+      instant, and it works even when ${L("perf:2", "P3")} is at the top and auto-slicing is muted.
+      Pressed as part of a chord, it never slices.</p>
+      <p><strong>Hold</strong> past a tenth of a second and P1/P2 become direction controls.
+      If the hold flipped anything, the release doesn't slice. If it didn't, it slices
+      like a slow tap.</p>`,
+    see: ["gestures:slice", "gestures:pingpong", "gestures:load"] },
+  { l: "B3", kicker: "Button · page group 2 · shift",
+    facts: [["Click", "Routing ↔ Secondary, on release"],
+            ["Hold 0.1 s + nudge", "Shift: snap any knob to its target and back"],
+            ["+ B2, 0.5 s", "Load"], ["+ B1, 0.5 s", "Factory reset, all pages"]],
+    body: `<p>Rotates between the two secondary pages, the cool-colored ones. Like B1,
+      the first press from the other group jumps back to where this group was left.
+      The page changes on release.</p>
+      <p><strong>Hold</strong> it, as printed, for SHIFT: every knob on the page holds still
+      and toggles between where it was and its snap target. If the hold snapped anything,
+      the release doesn't change the page.</p>`,
+    see: ["gestures:snap", "gestures:load", "b1"] },
+];
+
+/* JACK order: top row then bottom row, left to right. */
+const JACKS = [
+  { l: "In L", kicker: "Jack · audio in",
+    body: `<p>Left input. The two channels are detected and sliced independently.</p>`,
+    see: ["j:5"] },
+  { l: "Trig In", kicker: "Jack · trigger in",
+    facts: [["Fires", "Rising edge, ~+2 V"], ["Re-arms", "~+1 V"]],
+    body: `<p>External slice trigger. Every rising edge is taken, even with auto-slicing
+      muted at the top of P3. Shares B2's dark flash.</p>`,
+    see: ["b2", "perf:2", "j:2"] },
+  { l: "Trig 1", kicker: "Jack · CV 2 in · or trigger out",
+    facts: [["Default", "CV 2 in, the purple routing segment"],
+            ["As output", "0 / 5 V, 10 ms pulse on every slice"], ["Pip", "P3 shows slice triggers"]],
+    body: `<p>By default, ${L("routing:", "CV 2")}: a bipolar CV input with its own
+      segment on every routing knob.</p>
+      <p>Set to Outputs, it pulses once per slice that actually happens: detected
+      transients, B2 presses and Trig In edges alike. It never fires faster than the
+      detector's 150 ms hold-off, and a long ${L("secondary:1", "fade")} thins it further,
+      because the fade is also the retrigger floor.</p>`,
+    see: ["perf:2", "secondary:1", "j:3"] },
+  { l: "Trig 2", kicker: "Jack · trigger out",
+    facts: [["Pulse", "0 / 5 V, 10 ms"], ["Default", "Input triggers: every slice"],
+            ["Pip", "P4 shows output triggers"]],
+    body: `<p>${JACK_OUTS}</p>
+      <p>Output triggers are a pulse on each transient the output follower keeps, with the
+      same 150 ms hold-off. They never slice anything.</p>`,
+    see: ["j:2", "j:8"] },
+  { l: "Out L", kicker: "Jack · audio out",
+    body: `<p>Left output, after the dry/wet mix. There is no dry normalling in
+      hardware.</p>`,
+    see: ["secondary:4", "j:9"] },
+  { l: "In R", kicker: "Jack · audio in",
+    body: `<p>Right input.</p>`, see: ["j:0"] },
+  { l: "CV In", kicker: "Jack · CV in",
+    facts: [["Range", "Eurorack bipolar"]],
+    body: `<p>The external modulation source, routable to any Primary knob from the
+      ${L("routing:", "Routing")} page. Bipolar, like CV 2 and CV 3 on the Trig 1 and Env 1
+      jacks.</p>`,
+    see: ["routing:0", "depth:0"] },
+  { l: "Env 1", kicker: "Jack · CV 3 in · or envelope out",
+    facts: [["Default", "CV 3 in, the green routing segment"],
+            ["As output", "0 – 5 V input envelope"],
+            ["Pip", "P5 shows the input envelope; red on input clip"]],
+    body: `<p>By default, ${L("routing:", "CV 3")}: a bipolar CV input with its own
+      segment on every routing knob.</p>
+      <p>Set to Outputs, it carries the input follower's envelope, the same signal the
+      Routing page offers as a mod source.</p>`,
+    see: ["routing:0", "secondary:0", "j:8"] },
+  { l: "Env 2", kicker: "Jack · envelope out",
+    facts: [["Range", "0 – 5 V"], ["Default", "Input envelope"],
+            ["Pip", "P6 shows the output envelope"]],
+    body: `<p>${JACK_OUTS}</p>
+      <p>The output envelope is taken from the post-mix sum.</p>`,
+    see: ["routing:0", "j:7"] },
+  { l: "Out R", kicker: "Jack · audio out",
+    body: `<p>Right output, after the dry/wet mix.</p>`, see: ["j:4"] },
+];
+
+/* ─── Pages ─────────────────────────────────────────────────────────── */
+const VIEWS = {
+  perf: {
+    name: "Primary", hue: C.orange, group: "B1 · page 1 of 2",
+    caption: "Primary page · factory defaults",
+    buttons: [C.orange, C.orange, C.orange],
+    legend: [[C.orange, "value / forward"], [C.blue, "reverse"]],
+    overview: `<p>The six main controls. A modulation attenuverter and source selection for
+      each lives on the Depth and Routing pages, respectively.</p>
+      <p>Modulation is animated on each knob's ring: the arc follows the modulated
+      position, not just the pot.</p>`,
+    knobs: [
+      { l: "Pitch", ring: bipolar(0.5, C.orange, C.blue),
+        facts: [["Range", "−2× … stop … +2×, linear"], ["Noon", "Stop"],
+                ["Unity", "At ¼ and ¾, held by a ±0.03× detent"], ["Default", "1× forward"]],
+        body: `<p>Grain playback speed and direction. It is decoupled from time: the ${L("perf:1", "stretch")}
+          clock keeps its own rate. CW of noon the grains play <strong>forward</strong>,
+          CCW they play <strong>backward</strong>, up to 2× either way. Noon stops the head;
+          near noon is just very slow.</p>`,
+        see: ["perf:1", "gestures:pingpong", "depth:0"] },
+      { l: "Stretch", ring: bipolar(0.8, C.orange, C.blue),
+        facts: [["Range", "Realtime reverse … freeze … realtime forward"],
+                ["Noon", "True freeze"], ["Taper", "|u|<sup>2.5</sup> each side; ¾ ≈ 5.7× slower"],
+                ["Default", "0.9 of the sweep, ≈ 1.75× slower, forward"]],
+        body: `<p>Playback rate of the keyframe grid. At noon the grid <strong>stops</strong>
+          instead of crawling. CW runs it forward up to realtime, CCW runs it
+          <strong>backward</strong> up to realtime reverse.</p>
+          <h4>Running out of buffer</h4>
+          <p>The recorder writes sparse keyframes into a ring buffer of fixed size: 2<sup>21</sup>
+          keyframes per channel, about 44 seconds of full-rate stereo audio. Only extrema are
+          kept, so in practice it holds minutes, and longer at low ${L("perf:4", "Quality")}. If a freeze or a
+          reverse leaves the grid behind the oldest keyframe, it jumps back to now with a full
+          crossfade rather than a click.</p>`,
+        see: ["perf:0", "gestures:pingpong", "perf:4", "depth:1"] },
+      { l: "Threshold", ring: sweep(0.5, C.orange),
+        facts: [["CCW", "Most sensitive: the most slices"], ["CW", "Fewer slices"],
+                ["Top", "Auto-slicing off"], ["Default", "Noon"], ["Pip", "Mirrors Trig 1"]],
+        body: `<p>How readily a transient triggers a slice. Lower is more sensitive and slices
+          more often; higher slices less. At the very top, auto-slicing is off, and only
+          ${L("b2", "B2")} or ${L("j:1", "Trig In")} slices.</p>`,
+        see: ["b2", "j:1", "j:2", "routing:2"] },
+      { l: "Grain Size", ring: sweep(0.15, C.orange),
+        facts: [["Range", "32 – 4096 keyframes, linear"], ["Default", "642 keyframes"]],
+        body: `<p>How long a grain plays before the head is spliced on: the summed duration of
+          the next N keyframes, where N is the grain size. It counts keyframes, not time, so
+          dense material gives short grains and sparse material long ones, and lower
+          ${L("perf:4", "Quality")} stretches them further.</p>`,
+        see: ["perf:4", "secondary:1"] },
+      { l: "Quality", ring: sweep(1.0, C.orange),
+        facts: [["Range", "ε 0.08 (crunchy) → 0.001 (full fidelity), linear"],
+                ["Default", "Full fidelity"], ["Pip", "Mirrors Env 1; red on input clip"]],
+        body: `<p>An extremum is only stored as a keyframe if its value differs enough from the
+          previous keyframe. Quality sets how much is enough. CW keeps nearly every extremum;
+          CCW keeps fewer, making the representation sparser and, in turn, crunchier and more
+          lo-fi.</p>
+          <p>Fewer keyframes also means a longer buffer and longer ${L("perf:1", "freeze")} times.</p>`,
+        see: ["perf:3", "perf:1", "depth:4"] },
+      { l: "Feedback", ring: sweep(0.0, C.orange),
+        facts: [["Range", "Loop gain 0 – 1.5"], ["Unity", "At ⅔ of the sweep"],
+                ["Default", "Off"], ["Pip", "Mirrors Env 2"]],
+        body: `<p>The output is fed back into the input, through a saturator and a tunable
+          ${L("secondary:5", "state-variable bandpass")}
+          on the way.</p>
+          <p>Feedback only bites near <em>now</em>: right after a slice, while the read head is
+          close to the live input. The further a head lags behind now, the less influence the
+          feedback has. The tap sits before the mix, so turning
+          ${L("secondary:4", "Mix")} down doesn't
+          starve the loop.</p>`,
+        see: ["secondary:5", "routing:5", "perf:2"] },
+    ],
+  },
+
+  depth: {
+    name: "Depth", hue: C.pink, group: "B1 · page 2 of 2",
+    panel: ["PITCH MOD DEPTH", "STRETCH MOD DEPTH", "THRESH MOD DEPTH", "GRAIN MOD DEPTH",
+            "QUALITY MOD DEPTH", "FEEDBACK MOD DEPTH"],
+    caption: "Depth page · example settings (factory is all noon)",
+    buttons: [C.pink, C.pink, C.pink],
+    legend: [[C.pink, "positive depth"], [C.orange, "negative depth"]],
+    overview: `<p>One bipolar modulation depth per ${L("perf:", "Primary")} knob. Noon is off; a faint pink glow marks a
+      centred depth. Each pot sets how hard its ${L("routing:", "modulation source")} pushes the same-numbered
+      Primary knob: <code>source × depth</code>.</p>
+      <p>The two followers are unipolar, 0 to 1. The CV inputs are bipolar.</p>
+      <p><strong>Hold <kbd>B3</kbd> and nudge a depth toward noon to snap it to exactly
+      zero; nudge it back to return.</strong> <kbd>B1</kbd>+<kbd>B3</kbd> returns every page to factory, every
+      depth included.</p>`,
+    knobs: [
+      { l: "Pitch Mod Depth", ring: bipolar(0.5, C.pink, C.orange),
+        facts: [["Range", "−1 … +1"], ["Default", "Noon (off)"]],
+        body: `<p>Modulation depth for ${L("perf:0", "Pitch")}. Pitch is bipolar, so enough depth pushes
+          it through noon and the grains reverse.</p>`,
+        see: ["perf:0", "routing:0"] },
+      { l: "Stretch Mod Depth", ring: bipolar(-0.3, C.pink, C.orange),
+        facts: [["Range", "−1 … +1"], ["Default", "Noon (off)"]],
+        body: `<p>Modulation depth for ${L("perf:1", "Stretch")}. Pushing it through noon passes through
+          freeze into the opposite direction.</p>`,
+        see: ["perf:1", "routing:1"] },
+      { l: "Threshold Mod Depth", ring: bipolar(0.45, C.pink, C.orange),
+        facts: [["Range", "−1 … +1"], ["Default", "Noon (off)"]],
+        body: `<p>Modulation depth for ${L("perf:2", "Threshold")}.</p>`,
+        see: ["perf:2", "routing:2"] },
+      { l: "Grain Mod Depth", ring: bipolar(0.8, C.pink, C.orange),
+        facts: [["Range", "−1 … +1"], ["Default", "Noon (off)"]],
+        body: `<p>Modulation depth for ${L("perf:3", "Grain Size")}.</p>`,
+        see: ["perf:3", "routing:3"] },
+      { l: "Quality Mod Depth", ring: bipolar(0.6, C.pink, C.orange),
+        facts: [["Range", "−1 … +1"], ["Default", "Noon (off)"]],
+        body: `<p>Modulation depth for ${L("perf:4", "Quality")}.</p>`,
+        see: ["perf:4", "routing:4"] },
+      { l: "Feedback Mod Depth", ring: bipolar(0.35, C.pink, C.orange),
+        facts: [["Range", "−1 … +1"], ["Default", "Noon (off)"]],
+        body: `<p>Modulation depth for ${L("perf:5", "Feedback")}.</p>`,
+        see: ["perf:5", "routing:5"] },
+    ],
+  },
+
+  routing: {
+    name: "Routing", hue: C.blue, group: "B3 · page 1 of 2",
+    panel: ["PITCH MOD SOURCE", "STRETCH MOD SOURCE", "THRESH MOD SOURCE", "GRAIN MOD SOURCE",
+            "QUALITY MOD SOURCE", "FEEDBACK MOD SOURCE"],
+    caption: "Routing page · factory (all input follower)",
+    buttons: [C.blue, C.blue, C.blue],
+    legend: [],
+    overview: `<p>Each potentiometer is divided into colored segments that set which
+      source that control's modulation comes from:</p>
+      <div class="legend" style="flex-direction:column">
+        <span><i style="color:${C.orange};background:${C.orange}"></i>Orange · input envelope follower</span>
+        <span><i style="color:${C.blue};background:${C.blue}"></i>Blue · output envelope follower</span>
+        <span><i style="color:${C.white};background:${C.white}"></i>White · external CV input</span>
+        <span><i style="color:${C.violet};background:${C.violet}"></i>Purple · CV 2, the Trig 1 jack as an input</span>
+        <span><i style="color:${C.green};background:${C.green}"></i>Green · CV 3, the Env 1 jack as an input</span>
+      </div>
+      <p>The selected segment glows with its source's live level, so you can see whether
+      anything is arriving. The default is the input follower; how hard each source
+      pushes is set on the ${L("depth:", "Depth")} page.</p>
+      <p>${JACK_MODE}</p>`,
+    knobs: ["Pitch", "Stretch", "Threshold", "Grain Size", "Quality", "Feedback"].map((t, i) => ({
+      l: `${t} Mod Source`, ring: zones(0),
+      facts: [["Zones", "In Env · Out Env · CV In, + CV 2 · CV 3 with the jacks as inputs"],
+              ["Default", "In Env"]],
+      body: `<p>Modulation source for ${L(`perf:${i}`, t)}.</p>` + [
+        `<p>Pitch is bipolar, so the bipolar CV In can sweep it through noon in both directions.</p>`,
+        `<p>Stretch is bipolar, so the bipolar CV In can sweep it through freeze in both directions.</p>`,
+        ``,
+        ``, ``,
+        `<p>The output follower acts as a governor here: the louder the output gets, the further
+          the loop gain can go before it runs.</p>`,
+      ][i],
+      see: [`perf:${i}`, `depth:${i}`, "j:6"],
+    })),
+  },
+
+  secondary: {
+    name: "Secondary", hue: C.teal, group: "B3 · page 2 of 2",
+    panel: ["SMOOTHING", "FADE", "DRIVE", "CHARACTER", "MIX", "FEEDBACK TONE"],
+    caption: "Secondary page · defaults",
+    buttons: [C.teal, C.teal, C.teal],
+    legend: [[C.teal, "value"]],
+    overview: `<p>Deeper engine parameters: the envelope followers, overall latency and fade
+      time, the nonlinear saturators, and more.</p>`,
+    knobs: [
+      { l: "Smoothing", ring: sweep(0.43, C.teal),
+        facts: [["Range", "1.2 Hz – 3 kHz, exponential"], ["Default", "≈ 34 Hz"]],
+        body: `<p>Cutoff of the low-pass both envelope followers run through, applied before
+          detection. Low settings give slow, smooth envelopes for modulation; high settings
+          follow every transient.</p>
+          <p>More smoothing also lowers the envelope's overall level, so it changes how loud
+          transients read relative to ${L("perf:2", "Threshold")}.</p>`,
+        see: ["routing:0", "j:7", "j:8"] },
+      { l: "Fade", ring: sweep(0.22, C.teal),
+        facts: [["Range", "10 – 250 ms, exponential"], ["Default", "20 ms"]],
+        body: `<p>One knob with three linked consequences: the wet path's
+          <strong>latency</strong>, the splice <strong>crossfade length</strong>, and the
+          <strong>retrigger floor</strong>. Splices can't come faster than one fade.</p>
+          <p>Short is snappy and clicky at high rates. Long gives smeared, washy takeovers that
+          cap the splice rate at a few Hz. Changing it never moves a playing grain; the new
+          length applies from the next splice on.</p>`,
+        see: ["j:2", "secondary:4"] },
+      { l: "Drive", ring: sweep(0.14, C.teal),
+        facts: [["Range", "Keyframe shaper gain 0.5 – 4.0"], ["Default", "1.0"]],
+        body: `<p>Gain into the ${L("secondary:3", "keyframe waveshaper")}. It is applied to the <em>keyframes
+          themselves</em>, before interpolation, so the nonlinearity never sees the sample
+          rate and can't fold aliases into the band however hard you push it.</p>`,
+        see: ["secondary:3"] },
+      { l: "Character", ring: sweep(1.0, C.teal),
+        facts: [["Range", "Tape dropout ← clean → sinc boost"], ["Default", "Full sinc"]],
+        body: `<p>The keyframes pass through a nonlinear waveshaper before reconstruction, which
+          makes it an alias-free distortion. Character morphs between three shapes. CCW is a
+          tape dropout curve. Noon is clean and fully linear: no distortion. CW is the sinc
+          shaper, which warms the signal slightly by boosting its quiet parts.</p>`,
+        see: ["secondary:2"] },
+      { l: "Mix", ring: sweep(1.0, C.teal),
+        facts: [["Range", "Dry → wet"], ["Default", "Full wet"]],
+        body: `<p>Dry/wet blend at the outputs. Full wet is classic Capicola.</p>`,
+        see: ["secondary:1", "perf:5"] },
+      { l: "Feedback Tone", ring: sweep(0.38, C.teal),
+        facts: [["Range", "48 Hz – 21.6 kHz, exponential"], ["Default", "≈ 480 Hz"]],
+        body: `<p>Centre of the bandpass inside the ${L("perf:5", "feedback loop")}. It sets the tonality of
+          whatever the loop regenerates.</p>`,
+        see: ["perf:5"] },
+    ],
+  },
+
+  /* Not a module page: the panel shows which controls each gesture uses. */
+  gestures: {
+    name: "Gestures", hue: C.silk, group: "Panel-wide",
+    caption: "Lit = involved in the selected gesture",
+    buttons: [null, null, null],
+    legend: [],
+    overview: `<p>A small set of button moves for saving, loading, flipping direction and
+      snapping knobs home. Each works the same on every page.</p>`,
+    items: [
+      { id: "reset", l: "Factory Reset", lit: { b: [0, 2] },
+        facts: [["Gesture", "Hold B1 + B3 for 0.5 s"], ["Affects", "All four pages"],
+                ["Confirms", "Three white flashes"]],
+        body: `<p>Every page returns to its factory defaults, whichever page you're on. Your
+          save is untouched, so ${L("gestures:load", "<kbd>B2</kbd>+<kbd>B3</kbd>")} brings it back.</p>`,
+        see: ["gestures:save", "gestures:load", "gestures:snap"] },
+      { id: "save", l: "Save", lit: { b: [0, 1] },
+        facts: [["Gesture", "Hold B1 + B2 for 0.33 s"], ["Writes", "Slot 1, the boot slot"],
+                ["History", "The save it replaces joins slots 2–16; the oldest drops off"],
+                ["Confirms", "Three white flashes"]],
+        body: `<p>Saves all four pages as your save point, which is also what the module boots
+          into.</p>
+          <p>${HISTORY}</p>`,
+        see: ["gestures:load", "gestures:reset"] },
+      { id: "load", l: "Load", lit: { b: [1, 2] },
+        facts: [["Gesture", "Hold B2 + B3 for 0.5 s"], ["Reads", "Slot 1; nothing if empty"],
+                ["At power-up", "Slot 1, or factory defaults if empty"],
+                ["Confirms", "Three white flashes"]],
+        body: `<p>Brings your save point back on all four pages. Catch pips show on any setting
+          that was different. It also undoes a ${L("gestures:reset", "factory reset")}, which
+          never touches the save.</p>
+          <p>Older saves in the history are loaded from the web programmer over USB.</p>`,
+        see: ["gestures:save", "gestures:reset"] },
+      { id: "pingpong", l: "Polarity Flip", lit: { b: [1], k: [0, 1] },
+        facts: [["Gesture", "Hold B2, nudge Pitch or Stretch"], ["Where", "Primary page"]],
+        body: `<p>Hold B2 and nudge ${L("perf:0", "Pitch")} or ${L("perf:1", "Stretch")}, and its value flips polarity at the same
+          rate: 1.5× forward becomes 1.5× reverse. Flip back and forth for as long as B2 is
+          held. On release, whichever polarity it's in becomes the new setting, and B2
+          doesn't slice.</p>`,
+        see: ["perf:0", "perf:1", "b2"] },
+      { id: "snap", l: "Shift Snap", lit: { b: [2], k: [0, 1, 2, 3, 4, 5] },
+        facts: [["Gesture", "Hold B3 (SHIFT), nudge any knob"], ["Where", "Every page"],
+                ["Target", "Factory, or your save point (web programmer)"]],
+        body: `<p>Hold SHIFT and nudge any knob, on any page, and it snaps to its factory
+          default: depths to exactly zero. Nudge back the other way while still holding and it
+          returns. It's the per-knob ${L("gestures:reset", "factory reset")}.</p>
+          <p>${SNAP_TARGET}</p>`,
+        see: ["gestures:reset", "b3"] },
+      { id: "catch", l: "Pot Catch", lit: { k: [0, 1, 2, 3, 4, 5] },
+        body: `<p>Every page stores its own value for each knob. After a page switch or a load,
+          a knob is <strong>decoupled</strong> until the pot sweeps through the stored value.
+          The ring dims and shows a pip there. Once the pot passes the pip, it catches and
+          tracks. Nothing ever jumps.</p>
+          <p>On the Routing page catch is per zone: entering the stored zone is enough.</p>`,
+        see: ["gestures:load", "gestures:pingpong"] },
+      { id: "slice", l: "Slicing", lit: { b: [1], j: [1, 2] },
+        facts: [["Auto", "Detected transients above P3"], ["Manual", "B2, on release"],
+                ["External", "Trig In rising edge"], ["Reports", "Trig 1 pulse, B2 dark flash"]],
+        body: `<p>A slice snaps the read heads to the current moment with one fade-length
+          crossfade, and re-anchors the stretch grid from either direction.</p>
+          <p>Manual and external slices are always accepted, even with auto-slicing muted at
+          the top of ${L("perf:2", "P3")}. Kept detector events are at least 150 ms apart, and nothing splices
+          faster than one fade.</p>`,
+        see: ["perf:2", "b2", "j:1", "j:2", "secondary:1"] },
+    ],
+  },
+};
+</script>
+<script>
 /* ─── Real panel geometry, from capicola_panel.kicad_pcb ────────────── */
 /* knob index i: row = i>>1, col = i&1.  Ring windows: r 10.103, stroke
  * 1.4, sweep 111.4° → 428.6° (y-down degrees; 270°=noon), 317.2° total. */
@@ -45686,6 +46159,7 @@ const JACK = [[17.561,113.507],[29.372,113.533],[41.148,113.533],[52.876,113.533
 const RING_R = 10.103, RING_W = 1.4, A0 = 111.4, SPAN = 317.2;
 const PIP_DY = 6.35;          /* button pip offset, obround 2.85 × 1.4 */
 const KPIP_DY = 9.65;         /* under-knob dash window                */
+const HIT_R = { k: 12.2, b: 4.2, j: 4.6 };   /* knob hits stop short of the buttons */
 
 const pt = (cx, cy, a) => {
   const r = a * Math.PI / 180;
@@ -45704,82 +46178,6 @@ function obround(cx, cy, color, glow = true) {
     fill="${color}" ${glow ? 'filter="url(#glow)"' : ""}/>`;
 }
 
-/* ring display specs */
-const sweep   = (f,c)   => ({t:"sweep", f, c});
-const bipolar = (f,p,n) => ({t:"bi", f, p, n});
-const zones   = (sel)   => ({t:"zones", sel});
-const flat    = ()      => ({t:"flat"});
-
-const VIEWS = {
-  perf: {
-    name: "Primary", hue: C.orange, gesture: "B1 · page 1 of 2",
-    caption: "Primary page · factory defaults — buttons wear orange",
-    buttons: [C.orange, C.orange, C.orange],
-    lede: "The primary performance controls that give hands on access to the most impactful settings of the engine.",
-    knobs: [   /* positions = kPageDefaults: pitch unity, grain low, quality max, fb off */
-      { l:"Pitch",       r:"±12 semitones — unity at noon, ±0.2 semitone detent snaps true 0", ring: bipolar(0.0, C.orange, C.blue) },
-      { l:"Stretch",     r:"realtime → 6× slow at noon → <em>frozen</em>",        ring: sweep(0.5, C.orange) },
-      { l:"Slice thresh",r:"amplitude threshold for a transient to trigger a slice · max = disabled", ring: sweep(0.5, C.orange) },
-      { l:"Grain size",  r:"adaptive loop length, measured in keyframes",         ring: sweep(0.3, C.orange) },
-      { l:"Quality",     r:"crunchy tape → highest quality",                      ring: sweep(1.0, C.orange) },
-      { l:"Feedback",    r:"0 → 1.5 · beyond ⅔, gain > 1",                        ring: sweep(0.0, C.orange) },
-    ],
-    legend: [[C.orange,"value"],[C.blue,"negative pitch"]],
-    aside: "<b>Activity flashes OFF:</b> B2 goes dark on every trigger (manual or detected), so events stay legible over any page hue. PITCH's 6-o'clock pip doubles as the TRIG IN probe."
-  },
-
-  depth: {
-    name: "Depth", hue: C.pink, gesture: "B1 · page 2 of 2",
-    caption: "Depth page — buttons wear pink",
-    buttons: [C.pink, C.pink, C.pink],
-    lede: "One bipolar depth per primary knob: each pot sets how hard its own modulation source pushes it, −1 … +1 around noon.",
-    knobs: [
-      { l:"Pitch depth",     r:"−1 … +1", ring: bipolar( 0.5,  C.pink, C.orange) },
-      { l:"Stretch depth",   r:"−1 … +1", ring: bipolar(-0.3,  C.pink, C.orange) },
-      { l:"Thresh depth",    r:"−1 … +1", ring: bipolar( 0.45, C.pink, C.orange) },
-      { l:"Grain depth",     r:"−1 … +1", ring: bipolar( 0.8,  C.pink, C.orange) },
-      { l:"Quality depth",   r:"−1 … +1", ring: bipolar( 0.6,  C.pink, C.orange) },
-      { l:"Feedback depth",  r:"−1 … +1", ring: bipolar( 0.35, C.pink, C.orange) },
-    ],
-    legend: [[C.pink,"positive depth"],[C.orange,"negative depth"]],
-    aside: "<b>B1+B3 held on this page</b> zeroes every depth back to noon."
-  },
-
-  routing: {
-    name: "Routing", hue: C.blue, gesture: "B3 · page 1 of 2",
-    caption: "Routing page · factory (all output follower) — buttons wear blue",
-    buttons: [C.blue, C.blue, C.blue],
-    lede: "Each primary pot picks its modulation source from three ring zones, with zone-granular catch. Stored in presets. The factory default is the <strong>output follower</strong> — the module modulates itself with what it's already playing.",
-    knobs: [   /* factory: RoutingStore = all output follower */
-      { l:"Pitch source",   r:"out follower", ring: zones(1) },
-      { l:"Stretch source", r:"out follower", ring: zones(1) },
-      { l:"Thresh source",  r:"out follower", ring: zones(1) },
-      { l:"Grain source",   r:"out follower", ring: zones(1) },
-      { l:"Quality source", r:"out follower", ring: zones(1) },
-      { l:"Feedback source",r:"out follower", ring: zones(1) },
-    ],
-    legend: [[C.orange,"input follower"],[C.blue,"output follower"],[C.violet,"CV in jack"]],
-    aside: "<b>B1+B3 held here</b> resets all routing zones to factory. The selected zone burns bright; the other two stay dim so the full map reads at a glance."
-  },
-
-  secondary: {
-    name: "Secondary", hue: C.teal, gesture: "B3 · page 2 of 2",
-    caption: "Secondary settings · defaults — buttons wear teal",
-    buttons: [C.teal, C.teal, C.teal],
-    lede: "Deeper voicing controls with their own pot-catch, <strong>saved with everything else</strong> in the preset store. Our unique approach to drive operates in the sparse domain to minimize aliasing.",
-    knobs: [   /* defaults = engine boot values (kSecDefault norms) */
-      { l:"Env smoothing", r:"follower cutoff · ~1 Hz at CCW, exp",            ring: sweep(0.43, C.teal) },
-      { l:"Fade",          r:"10 → 250 ms latency / splice duration",          ring: sweep(0.22, C.teal) },
-      { l:"Drive",         r:"keyframe shaper gain 0.5 → 4.0",                 ring: sweep(0.14, C.teal) },
-      { l:"Character",     r:"low amplitude dropout → clean → sinc shaper",    ring: sweep(1.0,  C.teal) },
-      { l:"Mix",           r:"dry/wet · default full wet",                     ring: sweep(1.0,  C.teal) },
-      { l:"Feedback tone", r:"bandpass cutoff, 480 Hz default",                ring: sweep(0.38, C.teal) },
-    ],
-    legend: [[C.teal,"value"]],
-    aside: "<b>Fade is two things at once:</b> the baseline latency of the module and the splice duration. Short = clicky machine-gun splices; long = smeared washes that cap the splice rate at a few Hz."
-  }
-};
-
 /* ─── Dynamic layer ─────────────────────────────────────────────────── */
 function knobDisplay([cx, cy], spec) {
   let s = "";
@@ -45793,7 +46191,10 @@ function knobDisplay([cx, cy], spec) {
     else if (f < -0.005) s += ringArc(cx, cy, 0.5 + f, 0.5, spec.n);
     else s += ringArc(cx, cy, 0.495, 0.505, C.center, RING_W, false);
   } else if (spec.t === "zones") {
-    const zc = [C.orange, C.blue, C.violet], zt = [0, 4/13, 9/13, 1];
+    const five = state.jacksIn;
+    const zc = five ? [C.orange, C.blue, C.white, C.violet, C.green] : [C.orange, C.blue, C.white];
+    /* LED splits: 4|5|4, or 2|2|3|2|2 with the two end LEDs dark */
+    const zt = (five ? [1, 3, 5, 8, 10, 12] : [0, 4, 9, 13]).map(n => n / 13);
     zc.forEach((c, z) => {
       const dim = z !== spec.sel;
       s += ringArc(cx, cy, zt[z] + 0.006, zt[z+1] - 0.006,
@@ -45827,49 +46228,218 @@ function jackDisplay([cx, cy]) {
           <circle cx="${cx}" cy="${cy}" r="1.6" fill="${C.hole}"/>`;
 }
 
-function renderPanel(v) {
-  let s = "";
-  v.knobs.forEach((k, i) => { s += knobDisplay(KNOB[i], k.ring); });
-  v.buttons.forEach((c, i) => { s += buttonDisplay(BTN[i], c); });
-  JACK.forEach(j => { s += jackDisplay(j); });
-  document.getElementById("Ldyn").innerHTML = s;
-  document.getElementById("platecap").textContent = v.caption;
-}
-
-function renderNotes(v) {
-  const rows = v.knobs.map((k, i) => `
-    <tr>
-      <td class="pn">P${i+1}</td>
-      <td class="pl"><b>${k.l}</b></td>
-      <td class="pr">${k.r}</td>
-    </tr>`).join("");
-  const legend = v.legend.map(([c, t]) =>
-    `<span><i style="color:${c};background:${c}"></i>${t}</span>`).join("");
-  document.getElementById("notes").style.setProperty("--vc", v.hue);
-  document.getElementById("notes").innerHTML = `
-    <h2 style="--vc:${v.hue}">${v.name}</h2>
-    <span class="gesture">${v.gesture}</span>
-    <p class="lede">${v.lede}</p>
-    <div class="legend">${legend}</div>
-    <table class="knobs">${rows}</table>
-    <div class="aside">${v.aside}</div>`;
-}
-
-const tabs = document.getElementById("tabs");
-Object.entries(VIEWS).forEach(([key, v]) => {
-  const b = document.createElement("button");
-  b.textContent = v.name;
-  b.setAttribute("role", "tab");
-  b.style.setProperty("--vc", v.hue);
-  b.addEventListener("click", () => select(key));
-  tabs.appendChild(b);
+/* ─── Silkscreen knob labels ───────────────────────────────────────── */
+/* The panel art labels the Primary page. Other pages hide those glyphs (copper
+ * and mask layers both, every fragment in the label band — Q's tail is its own
+ * path) and set their own names in the same spot and face: Antonio, cap height
+ * 2.73 mm, top 11.72 mm below the knob centre, centred on it. A name that would
+ * run into the buttons — or a fallback font, if Antonio never loads — is
+ * squeezed to fit. */
+const LBL_TOP = 11.72, LBL_BASE = 14.45, LBL_MAX_W = 22;
+const silkGlyphs = KNOB.map(() => []);
+document.querySelectorAll("#Lcu path, #Lmask path").forEach(p => {
+  const b = p.getBBox();
+  if (b.height < 0.05 || b.width > 4) return;
+  KNOB.forEach(([kx, ky], i) => {
+    const top = ky + LBL_TOP;
+    if (b.y > top - 0.3 && b.y + b.height < top + 3.6
+        && Math.abs(b.x + b.width / 2 - kx) < 12.5)
+      silkGlyphs[i].push(p);
+  });
 });
-function select(key) {
-  [...tabs.children].forEach((b, i) =>
-    b.setAttribute("aria-selected", Object.keys(VIEWS)[i] === key ? "true" : "false"));
-  renderPanel(VIEWS[key]);
-  renderNotes(VIEWS[key]);
-}
-select("perf");
-</script>
 
+function labelDisplay([cx, cy], name) {
+  return `<text class="silk" x="${cx}" y="${(cy + LBL_BASE).toFixed(3)}"
+            text-anchor="middle">${name}</text>`;
+}
+
+/* ─── Selection model ───────────────────────────────────────────────── */
+/* A key names one thing to describe: "k3" (knob on the current page), "b1"
+ * (button 2), "j6" (jack 7), a gesture id, or null for the page overview.
+ * Cross-links use "view:index", "b<n>" (1-based, as on the panel), "j:<i>",
+ * or "gestures:<id>". */
+const state = { view: "perf", key: null, jacksIn: true };
+const VIEW_KEYS = Object.keys(VIEWS);
+
+function entityFor(view, key) {
+  const v = VIEWS[view];
+  if (key === null) return null;
+  if (key[0] === "k") return v.knobs[+key.slice(1)];
+  if (key[0] === "b") return BUTTONS[+key.slice(1)];
+  if (key[0] === "j") return JACKS[+key.slice(1)];
+  return v.items.find(it => it.id === key);
+}
+
+function kickerFor(view, key) {
+  const v = VIEWS[view], e = entityFor(view, key);
+  if (key[0] === "k") return `P${+key.slice(1) + 1} · ${v.name}`;
+  if (key[0] === "b" || key[0] === "j") return e.kicker;
+  return "Gesture";
+}
+
+function parseLink(ref) {
+  if (/^b\d$/.test(ref)) return { view: state.view, key: `b${+ref[1] - 1}` };
+  if (ref.startsWith("j:")) return { view: state.view, key: `j${ref.slice(2)}` };
+  const [view, rest] = ref.split(":");
+  if (rest === "") return { view, key: null };          /* "depth:" = the page overview */
+  return { view, key: view === "gestures" ? rest : `k${rest}` };
+}
+
+function linkLabel(ref) {
+  const { view, key } = parseLink(ref);
+  const e = entityFor(view, key);
+  if (key[0] === "k" && view !== state.view) return `${VIEWS[view].name} · ${e.l}`;
+  return e.l;
+}
+
+/* ─── Rendering ─────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+
+function renderPanel() {
+  const v = VIEWS[state.view];
+  const lit = (state.view === "gestures" && state.key && entityFor("gestures", state.key))
+              ? entityFor("gestures", state.key).lit : null;
+  let s = "";
+  KNOB.forEach((p, i) => {
+    silkGlyphs[i].forEach(g => { g.style.display = v.panel ? "none" : ""; });
+    if (v.panel) s += labelDisplay(p, v.panel[i]);
+    if (v.knobs) s += knobDisplay(p, v.knobs[i].ring);
+    else s += knobDisplay(p, flat()) +
+              (lit && lit.k && lit.k.includes(i) ? ringArc(p[0], p[1], 0, 1, v.hue) : "");
+  });
+  BTN.forEach((p, i) => {
+    const c = v.knobs ? v.buttons[i] : (lit && lit.b && lit.b.includes(i) ? v.hue : null);
+    s += buttonDisplay(p, c);
+  });
+  JACK.forEach((p, i) => {
+    s += jackDisplay(p);
+    if (lit && lit.j && lit.j.includes(i))
+      s += `<circle cx="${p[0]}" cy="${p[1]}" r="3.35" fill="none" stroke="${v.hue}"
+              stroke-width="0.5" filter="url(#glow)"/>`;
+  });
+  $("Ldyn").innerHTML = s;
+  $("Ldyn").querySelectorAll("text.silk").forEach(t => {
+    if (t.getComputedTextLength() > LBL_MAX_W) {
+      t.setAttribute("textLength", LBL_MAX_W);
+      t.setAttribute("lengthAdjust", "spacingAndGlyphs");
+    }
+  });
+  $("platecap").textContent = v.caption;
+  /* the jack-mode toggle, wherever the choice shows: routing, and the two jacks */
+  $("jacks").classList.toggle("on", state.view === "routing" || state.key === "j2" || state.key === "j7");
+  [...$("jacks").querySelectorAll("button")].forEach(b =>
+    b.setAttribute("aria-pressed", String(+b.dataset.jacks === +state.jacksIn)));
+
+  /* hit targets: knobs only where the page gives them meaning */
+  const hits = [];
+  if (v.knobs) KNOB.forEach((p, i) => hits.push([`k${i}`, p, HIT_R.k, v.knobs[i].l]));
+  BTN.forEach((p, i) => hits.push([`b${i}`, p, HIT_R.b, BUTTONS[i].l]));
+  JACK.forEach((p, i) => hits.push([`j${i}`, p, HIT_R.j, JACKS[i].l]));
+  $("Lhit").innerHTML = hits.map(([key, [cx, cy], r, label]) =>
+    `<circle class="hit${key === state.key ? " sel" : ""}" data-key="${key}"
+       cx="${cx}" cy="${cy}" r="${r}" tabindex="0" role="button" aria-label="${label}"/>`).join("");
+}
+
+function renderList() {
+  const v = VIEWS[state.view];
+  const rows = v.knobs
+    ? v.knobs.map((k, i) => [`k${i}`, `P${i + 1}`, k.l])
+    : v.items.map(it => [it.id, "", it.l]);
+  $("list").innerHTML = `
+    <h2>${v.name}</h2>
+    <span class="gesture">${v.group}</span>
+    <ul>
+      <li><button class="ctl" data-key="" aria-current="${state.key === null}">
+        <span class="n">·</span>Overview</button></li>
+      ${rows.map(([key, n, l]) => `
+      <li><button class="ctl" data-key="${key}" aria-current="${state.key === key}">
+        <span class="n">${n}</span>${l}</button></li>`).join("")}
+    </ul>`;
+}
+
+function renderDetail() {
+  const v = VIEWS[state.view];
+  const e = entityFor(state.view, state.key);
+  const facts = e && e.facts
+    ? `<dl class="facts">${e.facts.map(([k, d]) => `<dt>${k}</dt><dd>${d}</dd>`).join("")}</dl>` : "";
+  const see = e && e.see && e.see.length
+    ? `<div class="see"><span>See also</span>${e.see.map(r =>
+        `<button data-link="${r}">${linkLabel(r)}</button>`).join("")}</div>` : "";
+  const legend = !e && v.legend.length
+    ? `<div class="legend">${v.legend.map(([c, t]) =>
+        `<span><i style="color:${c};background:${c}"></i>${t}</span>`).join("")}</div>` : "";
+  $("detail").innerHTML = e
+    ? `<div class="kicker">${kickerFor(state.view, state.key)}</div>
+       <h3>${e.l}</h3>${facts}${e.body}${see}`
+    : `<div class="kicker">${v.group}</div>
+       <h3>${v.name}</h3>${legend}${v.overview}`;
+}
+
+function render() {
+  const v = VIEWS[state.view];
+  $("stage").style.setProperty("--vc", v.hue);
+  [...$("tabs").children].forEach((b, i) =>
+    b.setAttribute("aria-selected", VIEW_KEYS[i] === state.view ? "true" : "false"));
+  renderPanel(); renderList(); renderDetail();
+  try { history.replaceState(null, "", `#${state.view}${state.key ? "/" + state.key : ""}`); }
+  catch (_) { /* file:// in some browsers */ }
+}
+
+function go(view, key) {
+  state.view = view;
+  state.key = key;
+  render();
+}
+
+/* ─── Wiring ────────────────────────────────────────────────────────── */
+$("preamble").innerHTML = PREAMBLE;
+$("sub").textContent = `${TAGLINE} · Alchemy Lab V2 · 12 HP`;
+VIEW_KEYS.forEach(key => {
+  const b = document.createElement("button");
+  b.textContent = VIEWS[key].name;
+  b.setAttribute("role", "tab");
+  b.style.setProperty("--vc", VIEWS[key].hue);
+  b.addEventListener("click", () => go(key, null));
+  $("tabs").appendChild(b);
+});
+
+
+$("Lhit").addEventListener("click", ev => {
+  const t = ev.target.closest(".hit");
+  if (!t) return;
+  go(state.view, t.dataset.key === state.key ? null : t.dataset.key);
+});
+$("Lhit").addEventListener("keydown", ev => {
+  if ((ev.key === "Enter" || ev.key === " ") && ev.target.classList.contains("hit")) {
+    ev.preventDefault();
+    ev.target.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  }
+});
+$("jacks").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-jacks]");
+  if (!b) return;
+  state.jacksIn = b.dataset.jacks === "1";
+  render();
+});
+$("list").addEventListener("click", ev => {
+  const t = ev.target.closest(".ctl");
+  if (t) go(state.view, t.dataset.key || null);
+});
+$("detail").addEventListener("click", ev => {
+  const t = ev.target.closest("[data-link]");
+  if (!t) return;
+  ev.preventDefault();
+  const { view, key } = parseLink(t.dataset.link);
+  go(view, key);
+});
+
+/* deep link: #view or #view/key */
+(() => {
+  const [view, key] = location.hash.slice(1).split("/");
+  if (!VIEWS[view]) return go("perf", null);
+  go(view, key && entityFor(view, key) ? key : null);
+})();
+/* labels measure against the real face once it has loaded */
+if (document.fonts) document.fonts.ready.then(render);
+</script>
+</html>

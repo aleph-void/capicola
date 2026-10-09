@@ -5,7 +5,7 @@ The core idea of the module is this: Incoming stereo audio gets stretched out, a
 
 ![Block Diagram](docs/Capicola_Diagram.svg)
 
-The input and output envelope followers and their transients don't just live internal to the module. They're always accessible on the CV outputs of the module to trigger and modulate external devices. Each of the performance controls is normalized to the envelope followers, enabling the dynamics of the signal to modulate the controls in real time, leading to some bizarre and creative self patching who's intensity is visualized by animating the LED rings.
+The input and output envelope followers and their transients don't just live internal to the module. They're accessible on the CV outputs of the module to trigger and modulate external devices, and which follower goes to which jack is selectable in the web programmer. Each of the performance controls is normalized to the envelope followers, enabling the dynamics of the signal to modulate the controls in real time, leading to some bizarre and creative self patching who's intensity is visualized by animating the LED rings.
 
 KeyframeRecorder.h is the core method as described in the paper, and is set up not only for real time playback but also for offline recording and playback in contexts other than the Alchemy Lab. Additionally, lib contains several header files that are useful in their own right, namely:
 - An implementation of Vadim Zavalashin's "Zero Delay Feedback" filters (1-pole, state variable)
@@ -13,10 +13,10 @@ KeyframeRecorder.h is the core method as described in the paper, and is set up n
 - Tabulated function storage and recall for convenient low cost tanh(), sin(), and so on.
 - A TKEO driven peak detector with adaptive thresholding
 
-**Panel reference:** the
+**Manual:** the
 [interactive manual](https://heavylight-industries.github.io/capicola/manual.html)
-(live faceplate render, per-page LED state) or [MANUAL.md](MANUAL.md) —
-pages, buttons, jack map, fixed internals.
+— the real faceplate with live LED state per page. Click any knob, button or
+jack for its details; gestures, save and reset have their own tab.
 
 ## Examples
 

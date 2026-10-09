@@ -140,17 +140,17 @@ target_include_directories(capicola PRIVATE
 target_compile_definitions(capicola PRIVATE ALCHEMY_BOARD_V2)
 
 # ── HostLink identity / bench log ───────────────────────────────────────────
-# Short git hash, stamped into the HostLink HELLO + descriptor.
-execute_process(COMMAND git rev-parse --short HEAD
-                WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-                OUTPUT_VARIABLE CAPICOLA_GIT_HASH
-                OUTPUT_STRIP_TRAILING_WHITESPACE
-                ERROR_QUIET)
-if(NOT CAPICOLA_GIT_HASH)
-    set(CAPICOLA_GIT_HASH "nogit")
-endif()
-target_compile_definitions(capicola PRIVATE
-    CAPICOLA_GIT_HASH="${CAPICOLA_GIT_HASH}")
+# Short git hash (+ "-dirty"), stamped into the HostLink HELLO + descriptor.
+# Regenerated on every build by cmake/git_stamp.cmake; the header is only
+# rewritten when the stamp changes, so it never forces a rebuild on its own.
+set(CAPICOLA_STAMP_DIR "${CMAKE_BINARY_DIR}/generated")
+add_custom_target(capicola_git_stamp
+    COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}
+            -DOUT=${CAPICOLA_STAMP_DIR}/git_stamp.h
+            -P ${CMAKE_SOURCE_DIR}/cmake/git_stamp.cmake
+    BYPRODUCTS ${CAPICOLA_STAMP_DIR}/git_stamp.h)
+add_dependencies(capicola capicola_git_stamp)
+target_include_directories(capicola PRIVATE ${CAPICOLA_STAMP_DIR})
 
 # The 1 Hz CPU/CV bench log and hostlink::Host both want the front-panel USB
 # CDC — they are mutually exclusive.  Default: HostLink.  Configure with
@@ -171,6 +171,22 @@ endif()
 # i.e. NOT a CAPICOLA_BENCH_LOG image, which gives that port to the serial
 # log.  Fall back to `capicola-flash` in either case.
 find_program(_CAPICOLA_NODE NAMES node nodejs)
+
+# ── Manual text — docs/manual.html is the one source ───────────────────────
+# Regenerate src/capicola_manual_text.h whenever the manual's data block or the
+# generator changes. The header is checked in, so a build without node still
+# compiles — it just can't pick up manual edits.
+if(_CAPICOLA_NODE AND NOT CAPICOLA_BENCH_LOG)
+    add_custom_command(
+        OUTPUT  ${CMAKE_SOURCE_DIR}/src/capicola_manual_text.h
+        COMMAND "${_CAPICOLA_NODE}" ${CMAKE_SOURCE_DIR}/tools/manual_sync.mjs
+        DEPENDS ${CMAKE_SOURCE_DIR}/docs/manual.html
+                ${CMAKE_SOURCE_DIR}/tools/manual_sync.mjs
+        COMMENT "Manual text: docs/manual.html -> src/capicola_manual_text.h")
+    add_custom_target(capicola_manual_text
+        DEPENDS ${CMAKE_SOURCE_DIR}/src/capicola_manual_text.h)
+    add_dependencies(capicola capicola_manual_text)
+endif()
 set(_capicola_hostlink
     "${ALCHEMY_SDK_DIR}/tools/hostlink-cli/hostlink.mjs")
 

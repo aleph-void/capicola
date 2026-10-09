@@ -8,7 +8,7 @@
  *   P2 Stretch    bipolar +-1x; freeze at noon, |u|^2.5 taper each side
  *   P3 Threshold  keep ratio 0..8 over the envelope average (90% = 4, top = mute)
  *   P4 Grain Size 32 .. 4096 keyframes
- *   P5 Quality    analyzer ε 0.03 (crunchy) .. 0.001 (max)
+ *   P5 Quality    analyzer ε 0.08 (crunchy) .. 0.001 (max)
  *   P6 Feedback   0 .. 1.5 — wet → sinc sat → SVF bandpass → back into the recorder
  *
  * Buttons (panel-final): B1 = PAGE, B2 = SLICE, B3 = PAGE.
@@ -25,24 +25,34 @@
  *
  *   Depth:     pot i = bipolar depth (−1..+1) for pot i's modulation.
  *   Routing:   pot i = 3-zone source selector — input follower (orange, default)
- *              / output follower (blue) / CV IN (violet), zone-granular catch.
+ *              / output follower (blue) / CV IN (white), and CV 2 (purple) /
+ *              CV 3 (green) with Trig 1 / Env 1 flipped; zone-granular catch.
  *   Secondary: envelope smoothing, fade time, keyframe drive, drive
  *              character, MIX dry/wet, feedback bandpass — each with its own
  *              pot-catch.
  *
  * Routing zones and secondary norms both ride the preset store.
  *
- * B1+B2 held 0.33 s saves everything as the boot state (QSPI slot 0); B1+B3 held
- * 0.5 s resets the CURRENT view to factory defaults. Both confirm with a triple
- * dark blink. B2 alone is the ping-pong gesture, so the two never collide.
+ * Each button pair is one state move, confirmed with a triple white flash:
+ *   B1+B2 held 0.33 s  save everything as the boot state (QSPI slot 0); the save
+ *                      it replaces moves into the history (slots 1..15)
+ *   B2+B3 held 0.5 s   load it back (nothing happens if the slot is empty)
+ *   B1+B3 held 0.5 s   factory defaults on ALL four pages; the save is untouched
+ * A chord has to form inside the hold window of B2/B3, or that button is already
+ * a hold.
  *
- * B2 held is the PING-PONG gesture on P1/P2: the rate pins where it is and the
- * knob becomes a direction control — nudge it either way to flip polarity at
- * that same rate. Release and the knob is page-switched, inert behind a catch
- * pip until the pot is swept through it. The press still slices.
+ * B2 slices on RELEASE. Held alone past kHoldArmMs it is also the POLARITY FLIP
+ * gesture on P1/P2 (Primary page only): the rate pins where it is and the knob
+ * becomes a direction control — nudge it either way to flip polarity at that
+ * same rate. Release and the flip becomes the knob's stored value, behind a
+ * catch pip until the pot is swept through it. A hold that flipped anything
+ * doesn't slice on release; one that didn't slices like a slow tap.
  *
- * B1+B3 held 0.5 s resets the CURRENT view to factory defaults, confirmed with
- * a triple dark blink.
+ * B3 (printed SHIFT) pages on release. Held alone past kHoldArmMs it is the
+ * SHIFT layer, on every page and all six knobs: each holds still and toggles —
+ * nudged toward its snap target (factory, or the save point per the Options
+ * setting) it snaps there, nudged back it returns. A hold that snapped anything
+ * doesn't page on release.
  *
  *
  * Panel jacks (2×5, panel-final names, code indices in parens):
@@ -75,6 +85,8 @@
 #include "alchemy/surface/virtual_knob.h"
 
 #include "hardware.h"
+#include "git_stamp.h"                   /* CAPICOLA_GIT_HASH, per build */
+#include "jack_routing.h"                /* which signal drives which CV jack */
 #include "audio_engine.h"
 
 using namespace alchemy;
@@ -91,11 +103,13 @@ using SerialLog = daisy::Logger<daisy::LOGGER_EXTERNAL>;
 static constexpr LedPanel::Rgb kBlue   = {30, 110, 255};   // routing page / out-follower
 static constexpr LedPanel::Rgb kIce    = {150, 210, 255};  // perf bipolar negative
 static constexpr LedPanel::Rgb kOrange = {255, 110, 15};   // perf page / in-follower
-static constexpr LedPanel::Rgb kViolet = {160, 40, 255};   // depth positive / ext CV
+static constexpr LedPanel::Rgb kViolet = {160, 40, 255};   // CV 2 — the Trig 1 jack as an input
 static constexpr LedPanel::Rgb kCenter = {90, 90, 90};     // bipolar zero
 static constexpr LedPanel::Rgb kWhite  = {255, 255, 255};
 static constexpr LedPanel::Rgb kPink   = {255, 60, 150};   // depth page / positive depth
 static constexpr LedPanel::Rgb kTeal   = {0, 220, 200};    // secondary page
+static constexpr LedPanel::Rgb kGreen  = {20, 255, 40};    // CV 3 — the Env 1 jack as an input
+static constexpr LedPanel::Rgb kCvWhite = {255, 225, 190}; // CV IN — warm, a full-RGB white reads blue
 
 /* Mode color: worn by all three buttons, one hue per page. Activity flashes OFF.
  * B1 pages are warm, B3 pages cool. */
@@ -112,9 +126,6 @@ static constexpr LedPanel::Rgb kB3PageButton[2] = {
     kTeal,             // B3 page 1 — secondary settings
 };
 
-/* CV out levels. */
-static constexpr float kTrigVolts   = 5.0f;
-static constexpr float kEnvOutVolts = 5.0f;
 
 /* Trigger outs. The jack gets a standard Eurorack trigger; the pip is held
  * longer so a hit always survives a 16 ms render frame. Both come off the same
@@ -146,29 +157,20 @@ class TrigOut
         if (!High(t_ms)) startMs = t_ms ? t_ms : 1u;   // 0 is the "never fired" sentinel
     }
 
-    /* 1 ms poll. The trig outs sit on the I2C MCP4728, so write only on edges. */
-    void Poll(uint32_t t_ms, CvJack& jack)
-    {
-        const bool hi = High(t_ms);
-        if (hi == wasHigh) return;
-        wasHigh = hi;
-        jack.SetVolts(hi ? kTrigVolts : 0.0f);
-    }
-
     bool Lit(uint32_t t_ms) const
     {
         return startMs != 0u && (t_ms - startMs) < kTrigLedMs;
     }
 
-  private:
+    /* The jack-side pulse: high for kTrigPulseMs. */
     bool High(uint32_t t_ms) const
     {
         return startMs != 0u && (t_ms - startMs) < kTrigPulseMs;
     }
 
+  private:
     uint32_t lastCount = 0;
     uint32_t startMs   = 0;   // 0 = never fired
-    bool     wasHigh   = false;
 };
 
 static TrigOut trig1;   // TRIG 1 — every slice the engine takes
@@ -179,16 +181,25 @@ static TrigOut trig2;   // TRIG 2 — kept output-follower transients
 static AlchemyLabV2                 hw;
 static AlchemyLabAudio::AudioEngine engine;
 
+/* Trig 1 / Env 1 as CV inputs (CV 2, CV 3), and what Trig 2 / Env 2 carry
+ * then (jack_routing.h). Options fields, so they ride presets; OnPoll applies
+ * them to the jacks whenever they change, whoever changed them. */
+static jacks::Options jackOpts;
+
 /* ── Mod routing (replaces CvMatrix) ─────────────────────────────────────
  * Each perf pot picks its modulation source — input follower, output follower,
- * or the CV IN jack — and takes its bipolar depth from the depth view. A
- * CvSource because two of the three sources are internal engine signals. */
+ * the CV IN jack, and with the jacks flipped, CV 2 and CV 3 — and takes its
+ * bipolar depth from the depth view. A CvSource because two of the sources are
+ * internal engine signals. */
 class ModRouter : public CvSource
 {
   public:
     static constexpr uint8_t kSrcInEnv  = 0;
     static constexpr uint8_t kSrcOutEnv = 1;
     static constexpr uint8_t kSrcCv     = 2;   // panel CV IN (cv[1])
+    static constexpr uint8_t kSrcCv2    = 3;   // Trig 1 jack as input (cv[2])
+    static constexpr uint8_t kSrcCv3    = 4;   // Env 1 jack as input (cv[3])
+    static constexpr uint8_t kNumSrc    = 5;
 
     void SetDepth (uint8_t pot, float d)   { if (pot < NUM_POTS) depth[pot] = d; }
     void SetSource(uint8_t pot, uint8_t s) { if (pot < NUM_POTS) src[pot]   = s; }
@@ -200,19 +211,20 @@ class ModRouter : public CvSource
 
     void Update(const float* cv, uint32_t) override
     {
-        const float sigCv  = (cv[1] - 0.5f) * 2.0f;   // panel CV IN, bipolar
-        const float sigIn  = engine.EnvNormIn();      // unipolar 0..1
-        const float sigOut = engine.EnvNormOut();
+        sig[kSrcInEnv]  = engine.EnvNormIn();         // unipolar 0..1
+        sig[kSrcOutEnv] = engine.EnvNormOut();
+        sig[kSrcCv]     = (cv[1] - 0.5f) * 2.0f;      // bipolar ±1
+        sig[kSrcCv2]    = jackOpts.cvIn ? (cv[2] - 0.5f) * 2.0f : 0.0f;
+        sig[kSrcCv3]    = jackOpts.cvIn ? (cv[3] - 0.5f) * 2.0f : 0.0f;
         for (uint8_t p = 0; p < NUM_POTS; p++)
-        {
-            const float s = (src[p] == kSrcInEnv)  ? sigIn
-                          : (src[p] == kSrcOutEnv) ? sigOut
-                                                   : sigCv;
-            delta[p] = depth[p] * s;
-        }
+            delta[p] = depth[p] * sig[src[p] < kNumSrc ? src[p] : kSrcInEnv];
     }
 
+    /* Live value of a source, for the routing rings and the pips. */
+    float Signal(uint8_t s) const { return (s < kNumSrc) ? sig[s] : 0.0f; }
+
   private:
+    float   sig  [kNumSrc]  = {};
     float   depth[NUM_POTS] = {};
     uint8_t src  [NUM_POTS] = {};   // defaults to input follower
     float   delta[NUM_POTS] = {};
@@ -225,22 +237,24 @@ static ModRouter modRouter;
 static constexpr float kPitchMax    = 2.0f;    // speed at either stop
 static constexpr float kPitchDetent = 0.03f;   // ±0.03x holds each unity
 
-/* ── Ping-pong gesture, shared by Pitch and Stretch ───────────────────────
- * Hold B2 (or a high TRIG IN gate) and the knob stops being a value and becomes
+/* ── Polarity flip gesture, shared by Pitch and Stretch ───────────────────
+ * Hold B2 and the knob stops being a value and becomes
  * a DIRECTION control: the magnitude pins where it was, and the MOMENTUM of the
  * knob sets polarity — nudge it toward negative and playback flips to reverse at
  * that same rate, nudge back toward positive and it flips forward. Release and
- * the knob is page-switched: inert, showing a catch pip, until the pot is swept
- * through the value the gesture left behind. Same PotState the Pager uses, so
- * the pip means exactly what it means everywhere else.
+ * the value the gesture left behind is written into the pager, so the knob is
+ * decoupled behind the pager's own catch pip until the pot is swept through it,
+ * and a save keeps the flip.
  *
- * Momentum is measured on the MODULATED value, so a CV riding the knob flips
- * polarity too — an LFO into P1 while B2 is held is automatic ping-pong at the
- * LFO's rate.
+ * Momentum is measured on the physical pot only. Modulation never flips a
+ * polarity: a CV or follower riding P1/P2 under a held B2 would otherwise flip
+ * on its own and eat the release's slice.
  *
- * B2 is the only hold source. A sustained TRIG IN gate was tried as a second
- * one and taken out: a long gate then made both knobs inert for value, which is
- * the wrong thing to happen to a patch that just uses long gates.
+ * B2 is the only hold source. Its slice used to fire on press, so every flip
+ * also snapped the head to now; it now fires on release, and not at all if the
+ * hold nudged P1 or P2. A sustained TRIG IN gate was tried as a second source
+ * and taken out: a long gate then made both knobs inert for value, which is the
+ * wrong thing to happen to a patch that just uses long gates.
  *
  * One struct per knob; the magnitude map and its inverse are passed in, since
  * Pitch and Stretch taper differently. */
@@ -248,13 +262,15 @@ static constexpr float kGestureNudge = 0.015f;   // 1.5% of sweep counts as a mo
 
 struct GestureKnob
 {
-    PotState catchState;
-    bool     b2Prev      = false;
+    PotState view;                  // the pager's catch for this pot — what the ring shows
+    bool     commit      = false;   // a flip to write into the pager as the new stored value
+    bool     heldPrev    = false;
     bool     latchRev    = false;   // polarity the momentum has latched
+    bool     nudged      = false;   // moved during this B2 hold — the release won't slice
     float    ref         = 0.75f;   // pot position the nudge is measured from
     float    frozenMag   = 1.0f;
     float    liveMag     = 1.0f;    // magnitude to play this frame
-    float    heldNorm    = 0.75f;   // live gesture value; becomes the catch target
+    float    heldNorm    = 0.75f;   // live gesture value; becomes the stored value
     float    displayNorm = 0.75f;   // what the arc draws
 };
 
@@ -268,7 +284,7 @@ static float GestureNorm(GestureKnob& g, float n, float phys, bool held,
     float eff;
     if (held)
     {
-        if (!g.b2Prev)                       // gesture opens: pin rate and side
+        if (!g.heldPrev)                       // gesture opens: pin rate and side
         {
             /* From what is PLAYING, not from the knob. After a release while
              * flipped the pot still sits on the old side, so seeding from it
@@ -278,27 +294,33 @@ static float GestureNorm(GestureKnob& g, float n, float phys, bool held,
             const float cur = g.displayNorm;
             g.frozenMag = magFn(cur);
             g.latchRev  = (cur < 0.5f);
-            g.ref       = n;                 // momentum is still measured on the knob
+            g.ref       = phys;              // momentum is measured on the pot itself
         }
-        if (n < g.ref - kGestureNudge)        { g.latchRev = true;  g.ref = n; }
-        else if (n > g.ref + kGestureNudge)   { g.latchRev = false; g.ref = n; }
+        if (phys < g.ref - kGestureNudge)      { g.latchRev = true;  g.ref = phys; g.nudged = true; }
+        else if (phys > g.ref + kGestureNudge) { g.latchRev = false; g.ref = phys; g.nudged = true; }
         g.heldNorm = normFn(g.frozenMag, g.latchRev);
         g.liveMag  = g.frozenMag;        // exact — no norm round trip
         eff = g.heldNorm;
     }
     else
     {
-        if (g.b2Prev)                       // just released: decouple
+        /* Just released: what the gesture left playing becomes the knob's
+         * stored value in the pager (the caller writes it — `commit`), so a
+         * save keeps the flip and the pager's own catch pip decouples the pot.
+         * Only if it flipped something: a hold that nudged nothing leaves the
+         * knob as it was. The release frame plays the held value, since `n`
+         * was read before the write. */
+        if (g.heldPrev && g.nudged)
         {
-            g.catchState.stored = g.heldNorm;
-            InitCatch(g.catchState, phys);
+            g.commit = true;
+            eff      = g.heldNorm;
         }
-        UpdateCatch(g.catchState, phys);
-        eff = g.catchState.stored + (n - phys);   // modulation still rides on top
+        else
+            eff = n;
         if (eff < 0.0f) eff = 0.0f; else if (eff > 1.0f) eff = 1.0f;
         g.liveMag = magFn(eff);
     }
-    g.b2Prev      = held;
+    g.heldPrev      = held;
     g.displayNorm = eff;
     return eff;
 }
@@ -317,8 +339,9 @@ static void DrawGestureRing(LedPanel& panel, uint8_t pot, const ArcGeometry& arc
     const GestureKnob& g = *static_cast<const GestureKnob*>(ctx);
 
     /* PerfRenderer dims an uncaught arc to 30%; a Custom ring has to do that
-     * itself or a decoupled P1/P2 would look live when every other knob dims. */
-    const float k = g.catchState.caught ? 1.0f : 0.30f;
+     * itself or a decoupled P1/P2 would look live when every other knob dims.
+     * `view` is the pager's catch, copied in each frame by OnFrame. */
+    const float k = g.view.caught ? 1.0f : 0.30f;
 
     FillDesc desc;
     desc.mode         = FillMode::Center;
@@ -329,7 +352,7 @@ static void DrawGestureRing(LedPanel& panel, uint8_t pot, const ArcGeometry& arc
     RingFrame f;
     f.Begin(arc);
     f.Base(desc, g.displayNorm, t_ms);
-    f.Emit(panel, pot, g.catchState);
+    f.Emit(panel, pot, g.view);
 }
 
 VirtualKnob pitch = VirtualKnob(0, "Pitch")
@@ -395,12 +418,9 @@ VirtualKnob grainSize = VirtualKnob(3, "Grain Size")
 
 VirtualKnob quality = VirtualKnob(4, "Quality")
     .Ident("perf.quality")
-    /* ε 0.03..0.001. The old CCW end was 0.1, which measured ~2.5 dB
-     * reconstruction SNR on speech — past crunchy into broken, and because the
-     * map is linear in ε it ate half the sweep. 0.03 measures ~13.3 dB against
-     * 17.1 at the CW end, so the whole travel is now usable and reads roughly
-     * evenly in dB. */
-    .Linear(0.03f, 0.001f)  // analyzer ε — CW = max fidelity, CCW = crunchy
+    /* ε 0.08..0.001. 0.1 was a bit much at the CCW end and 0.03 was not
+     * crunchy enough; 0.08 sits between them. */
+    .Linear(0.08f, 0.001f)  // analyzer ε — CW = max fidelity, CCW = crunchy
     /* The host would otherwise render the raw epsilon as a backwards
      * "0.1 .. 0.001" sweep; fidelity percent is what the knob means. */
     .Disp("{\"kind\":\"norm\"}")
@@ -447,22 +467,34 @@ VirtualKnob cvDepth6 = VirtualKnob(5, "P6 Depth")
     .Ident("depth.p6")
     .Linear(-1.f, +1.f).Ring(Bipolar(kPink, kOrange, kCenter)).Overdraw(DrawDepthGlow);
 
-/* ── Mod routing view (B3 double-tap; not a pager page) ──────────────────
- * Three-zone source selector per pot. The ring shows all three source colors
- * as thirds (input follower / output follower / CV IN, CCW→CW) with the
- * selected third at full intensity; the dim thirds double as the position
- * map. No catch pip — but catch is zone-granular: a pot decouples on entry
- * and re-locks the moment it sits inside its stored zone. */
+/* ── Mod routing view (B3 page 0; not a pager page) ──────────────────────
+ * Zone source selector per pot: input follower / output follower / CV IN, and
+ * CV 2 / CV 3 when Trig 1 and Env 1 are flipped to inputs (CCW→CW). The ring
+ * shows every zone in its color, the selected one lit by its source's live
+ * level; the dim zones double as the position map. No catch pip — but catch
+ * is zone-granular: a pot decouples on entry and re-locks the moment it sits
+ * inside its stored zone. */
 
-static constexpr uint8_t kNumSrcZones = 3;
-static constexpr LedPanel::Rgb kSrcColors[kNumSrcZones] = {kOrange, kBlue,
-                                                           kViolet};
+static constexpr uint8_t kMaxSrcZones = ModRouter::kNumSrc;
+/* CCW → CW, alternating the most different hues so neighbours never blur
+ * through the panel's diffusion. */
+static constexpr LedPanel::Rgb kSrcColors[kMaxSrcZones] = {kOrange, kBlue,
+                                                           kCvWhite, kViolet,
+                                                           kGreen};
+
+/* Three zones, or five with the jacks flipped to inputs. */
+static uint8_t NumZones() { return jackOpts.cvIn ? kMaxSrcZones : 3; }
 
 static int ZoneOf(float v)
 {
-    const int z = (int)(v * (float)kNumSrcZones);
-    return (z > kNumSrcZones - 1) ? kNumSrcZones - 1 : (z < 0) ? 0 : z;
+    const int n = NumZones();
+    const int z = (int)(v * (float)n);
+    return (z > n - 1) ? n - 1 : (z < 0) ? 0 : z;
 }
+
+/* A stored CV 2/3 zone falls back to the input follower while the jacks are
+ * outputs. The stored zone itself is kept, so flipping back restores it. */
+static uint8_t EffectiveZone(uint8_t z) { return (z < NumZones()) ? z : 0; }
 
 #ifndef CAPICOLA_BENCH_LOG
 /* Routing field identity and prose — defined in capicola_manual.cpp so every
@@ -473,6 +505,12 @@ extern const char* const kRouteFieldHelp[NUM_POTS];
 extern const VirtualKnob* const kRouteSeeKnob[NUM_POTS];
 extern const char* const kRouteDispJson;
 #endif
+
+/* Raised by every preset apply — boot, the panel's load, and HostLink's
+ * load-from-slot and live push alike — so OnFrame can re-arm catch against the
+ * new values. Presets has no after-load hook; every apply deserializes the
+ * whole managed set, RoutingStore included, so that is where it's raised. */
+static bool stateApplied = false;
 
 /* Persisted zone per perf pot — rides the preset store as its own component
  * now that routing left the Pager. */
@@ -489,14 +527,15 @@ class RoutingStore : public Serializable
     bool Deserialize(const uint8_t* in) override
     {
         for (uint8_t p = 0; p < NUM_POTS; p++)
-            zone[p] = (in[p] < kNumSrcZones) ? in[p]
-                                             : (uint8_t)(kNumSrcZones - 1);
+            zone[p] = (in[p] < kMaxSrcZones) ? in[p]
+                                             : (uint8_t)(kMaxSrcZones - 1);
+        stateApplied = true;
         return true;
     }
     uint32_t SchemaHash() const override
     {
         return 0x43563034u ^ (uint32_t)NUM_POTS
-                           ^ ((uint32_t)kNumSrcZones << 8);
+                           ^ ((uint32_t)kMaxSrcZones << 8);
     }
 
 #ifndef CAPICOLA_BENCH_LOG
@@ -513,7 +552,7 @@ class RoutingStore : public Serializable
             const SeeRef see[1] = {SeeRef(*kRouteSeeKnob[p])};
             if (!w.Field(kRouteFieldId[p], kRouteFieldName[p], p,
                          hostlink::FieldType::Enum, 0.0f /* in follower */,
-                         kRouteDispJson, kNumSrcZones, 0, (int16_t)p,
+                         kRouteDispJson, kMaxSrcZones, 0, (int16_t)p,
                          kRouteFieldHelp[p], see, 1u))
                 return false;
         }
@@ -536,15 +575,32 @@ static float   underNorm[NUM_POTS] = {};
 static inline bool RoutingOpen()   { return b3Active && b3Page == kB3Routing; }
 static inline bool SecondaryOpen() { return b3Active && b3Page == kB3Secondary; }
 
-static void DrawRouteRing(uint8_t pot, uint8_t sel)
+/* The selected zone's brightness follows its source live — an envelope as
+ * it is, a CV by |volts| — over a floor that keeps the selection readable, so
+ * the page shows at a glance whether anything is arriving. */
+static void DrawRouteRing(uint8_t pot, uint8_t sel, float level)
 {
     /* Orange gets a higher dim floor: its low G/B channels quantize away and it
      * reads dimmer than its neighbors at equal scale. */
-    static constexpr float kZoneDim[3] = {0.12f, 0.06f, 0.06f};
+    static constexpr float kZoneDim[kMaxSrcZones] = {0.12f, 0.06f, 0.06f, 0.06f, 0.06f};
+    static constexpr float kSelFloor = 0.25f;
+    /* Five zones leave the two end LEDs dark for contrast: 2|2|3|2|2, the
+     * middle one taking the noon LED so the map stays symmetric. */
+    static constexpr uint8_t kOff = 0xFF;
+    static constexpr uint8_t kLed3[13] = {0,0,0,0, 1,1,1,1,1, 2,2,2,2};               // 4|5|4
+    static constexpr uint8_t kLed5[13] = {kOff, 0,0, 1,1, 2,2,2, 3,3, 4,4, kOff};    // 2|2|3|2|2
+    const uint8_t* led = jackOpts.cvIn ? kLed5 : kLed3;
+    if (level < 0.0f) level = 0.0f; else if (level > 1.0f) level = 1.0f;
     for (int s = 0; s <= 12; s++)
     {
-        const int   zone = (s < 4) ? 0 : (s < 9) ? 1 : 2;   // 4|5|4 LEDs
-        const float k    = (zone == sel) ? 1.0f : kZoneDim[zone];
+        const uint8_t zone = led[s];
+        if (zone == kOff)
+        {
+            hw.leds.SetRingByHour(pot, 7.5f + 0.75f * (float)s, LedPanel::Rgb{0, 0, 0});
+            continue;
+        }
+        const float   k    = (zone == sel) ? kSelFloor + (1.0f - kSelFloor) * level
+                                           : kZoneDim[zone];
         hw.leds.SetRingByHour(pot, 7.5f + 0.75f * (float)s,
             hw.leds.ScaleGlobal(LedPanel::Scale(kSrcColors[zone], k)));
     }
@@ -560,16 +616,16 @@ Page depthPage = Page(1).Name("Depth").Knobs(cvDepth1, cvDepth2, cvDepth3,
 static ControlLoop loop  (hw);
 static Pager       pager (hw.buttons[0], 2, NUM_POTS);   // B1: perf ↔ depth
 
-/* Startup settings = preset slot 0. The Pager is the only managed component —
- * its stored knob values are the module's settings. BootLoad() at startup;
- * hold B1+B2 kSaveHoldMs to overwrite (see OnPoll). */
+/* Startup settings = preset slot 0: the Pager's stored knob values, routing,
+ * secondary and options. BootLoad() at startup; hold B1+B2 kSaveHoldMs to save
+ * (see SaveToHistory, OnPoll). */
 static Presets presets(hw.seed.qspi);
 
 #ifndef CAPICOLA_BENCH_LOG
 /* Browser/CLI preset editor over the front-panel USB CDC (SDK default
  * transport). Identity strings are literals — kept by reference. */
 hostlink::Host host(presets, "capicola", "Capicola",
-                           "1.0.0", CAPICOLA_GIT_HASH);
+                           "1.1.0", CAPICOLA_GIT_HASH);
 
 /* src/capicola_manual.cpp — attaches the firmware-authored manual (prose,
  * jacks, buttons) to the descriptor. Called before BootLoad() brings USB up. */
@@ -577,19 +633,29 @@ void DescribeManual(hostlink::Host& host);
 #endif
 
 static constexpr uint32_t kSaveHoldMs  = 330;
-static constexpr uint32_t kResetHoldMs = 500;    // B1+B3: reset current page
-static constexpr uint32_t kSaveFlashMs  = 600;   // 3 dark pulses at kSaveBlinkMs
+static constexpr uint32_t kLoadHoldMs  = 500;    // B2+B3: load the boot state
+static constexpr uint32_t kResetHoldMs = 500;    // B1+B3: factory, all pages
+static constexpr uint32_t kSaveFlashMs  = 600;   // 3 white pulses at kSaveBlinkMs
 static constexpr uint32_t kSaveBlinkMs  = 100;
-static uint32_t saveFlashMs = 0;   // 0 = never; set on save/reset commit
+static uint32_t saveFlashMs = 0;   // 0 = never; set when a save/load/reset completes
+
+/* Start the confirm flash now — read the clock after the work, not before: a
+ * save writes the history slot first, and flash writes block the loop. */
+static void ConfirmFlash()
+{
+    const uint32_t now = daisy::System::GetNow();
+    saveFlashMs = now ? now : 1u;
+}
 
 
 /* Factory defaults (stored norms) — seeded at boot AND restored per-page by the
  * B1+B3 hold. One table so the two can never drift apart. (Routing zones default
  * to the input follower in RoutingStore's own initializer.) */
 static constexpr float kPageDefaults[2][NUM_POTS] = {
-    /* perf: pitch unity forward, stretch ~6x forward, threshold mid, grain,
-     * quality max, feedback off. */
-    {0.75f, 0.75f, 0.5f, 0.3f, 1.0f, 0.0f},
+    /* perf: pitch unity forward, stretch ~1.75x forward (not realtime: at 1.0
+     * a pitched grain at "now" is just the OLA taking over), threshold mid,
+     * grain 642 keyframes, quality max, feedback off. */
+    {0.75f, 0.9f, 0.5f, 0.15f, 1.0f, 0.0f},
     /* depths: noon = off */
     {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f},
 };
@@ -716,6 +782,179 @@ class SecondaryStore : public Serializable
 
 static SecondaryStore secondary;
 
+#ifndef CAPICOLA_BENCH_LOG
+/* Options field identity and prose — defined in capicola_manual.cpp. */
+extern const char* const kOptSnapId;
+extern const char* const kOptSnapName;
+extern const char* const kOptSnapDisp;
+extern const char* const kOptSnapHelp;
+extern const char* const kOptJacksId;
+extern const char* const kOptJacksName;
+extern const char* const kOptJacksDisp;
+extern const char* const kOptJacksHelp;
+extern const char* const kOptTrig2Id;
+extern const char* const kOptTrig2Name;
+extern const char* const kOptEnv2Id;
+extern const char* const kOptEnv2Name;
+extern const char* const kOptOutDisp;
+extern const char* const kOptOutsHelp;
+#endif
+
+/* Settings with no knob, edited from the web programmer. They ride the preset
+ * store like everything else, so a save carries them. */
+class OptionsStore : public Serializable
+{
+  public:
+    uint8_t snapToSaved = 0;   // SHIFT snap target: 0 = factory, 1 = the save point
+                               // bytes 1..3: jackOpts (file scope — ModRouter reads it)
+
+    size_t SerializedSize() const override { return 1 + jacks::kBytes; }
+    void   Serialize(uint8_t* out) const override
+    {
+        out[0] = snapToSaved;
+        jacks::Encode(jackOpts, out + 1);
+    }
+    bool   Deserialize(const uint8_t* in) override
+    {
+        snapToSaved = in[0] ? 1 : 0;
+        jackOpts    = jacks::Decode(in + 1);
+        return true;
+    }
+    uint32_t SchemaHash() const override { return 0x4F505433u; }
+
+#ifndef CAPICOLA_BENCH_LOG
+    bool Describe(hostlink::ComponentWriter& w) const override
+    {
+        w.Ident("options").Label("Options");
+        return w.Field(kOptSnapId, kOptSnapName, 0, hostlink::FieldType::Enum,
+                       0.0f, kOptSnapDisp, 2u, -1, -1, kOptSnapHelp)
+            && w.Field(kOptJacksId, kOptJacksName, 1, hostlink::FieldType::Enum,
+                       jacks::Options{}.cvIn ? 1.0f : 0.0f, kOptJacksDisp, 2u,
+                       -1, -1, kOptJacksHelp)
+            && w.Field(kOptTrig2Id, kOptTrig2Name, 2, hostlink::FieldType::Enum,
+                       (float)jacks::Options{}.trig2, kOptOutDisp, jacks::kNumSignals,
+                       -1, -1, kOptOutsHelp)
+            && w.Field(kOptEnv2Id, kOptEnv2Name, 3, hostlink::FieldType::Enum,
+                       (float)jacks::Options{}.env2, kOptOutDisp, jacks::kNumSignals,
+                       -1, -1, kOptOutsHelp);
+    }
+#endif
+};
+
+static OptionsStore options;
+
+/* The save point (slot 0) as values, for the SHIFT snap's "saved" target. Read
+ * back out of flash whenever slot 0's record changes — boot, a panel save, a
+ * write from the programmer — so it is always exactly what B2+B3 would load.
+ * Offsets come from walking the managed set, the same order Presets writes. */
+static float   savedPage[2][NUM_POTS];   // Pager::Serialize: page-major floats
+static uint8_t savedZone[NUM_POTS];
+static float   savedSec [NUM_POTS];
+static bool    savedValid = false;
+
+static void RefreshSaved()
+{
+    static uint8_t buf[256];
+    savedValid = false;
+    const Presets::SlotInfo info = presets.InfoFor(0);
+    if (!info.valid || !info.schema_match || presets.LiveSize() > sizeof(buf)) return;
+    uint16_t total = 0;
+    if (presets.ReadSlotBytes(0, 0, buf, sizeof(buf), nullptr, &total) <= 0
+        || total != presets.LiveSize())
+        return;
+    size_t off = 0;
+    for (uint8_t i = 0; i < presets.NumManaged(); i++)
+    {
+        const Serializable* c = presets.ManagedAt(i);
+        if (c == &pager)
+            std::memcpy(savedPage, buf + off, sizeof(savedPage));
+        else if (c == &routing)
+            for (uint8_t p = 0; p < NUM_POTS; p++)
+                savedZone[p] = (buf[off + p] < kMaxSrcZones) ? buf[off + p] : 0;
+        else if (c == &secondary)
+            std::memcpy(savedSec, buf + off, sizeof(savedSec));
+        off += c->SerializedSize();
+    }
+    savedValid = true;
+}
+
+/* Panel saves name themselves "Save 1", "Save 2", … so the programmer's slot
+ * cards show the history's order. A save that is untitled, or already one of
+ * ours, gets the next number; a name typed in the programmer is kept. Names
+ * ride last in every record (UseNames pins them there), so each slot's name is
+ * its record's final PresetName::kCapacity bytes, whatever its schema. */
+static PresetName* presetName = nullptr;   // from presets.UseNames()
+
+static bool AutoNumber(const char* s, uint32_t& n)
+{
+    if (std::strncmp(s, "Save ", 5) != 0 || s[5] == '\0') return false;
+    n = 0;
+    for (const char* c = s + 5; *c; c++)
+    {
+        if (*c < '0' || *c > '9' || n > 99999999u) return false;
+        n = n * 10u + (uint32_t)(*c - '0');
+    }
+    return true;
+}
+
+static void NameThisSave()
+{
+    if (!presetName) return;
+    uint32_t n = 0;
+    const char* cur = presetName->Get();
+    if (cur[0] != '\0' && !AutoNumber(cur, n)) return;   // the user's own name
+
+    uint32_t last = 0;
+    char     nm[PresetName::kCapacity];
+    for (uint8_t i = 0; i < Presets::kNumSlots; i++)
+    {
+        const Presets::SlotInfo h = presets.InfoFor(i);
+        if (!h.valid || h.length < PresetName::kCapacity) continue;
+        if (presets.ReadSlotBytes(i, h.length - PresetName::kCapacity, (uint8_t*)nm,
+                                  PresetName::kCapacity, nullptr, nullptr)
+            != (int32_t)PresetName::kCapacity)
+            continue;
+        nm[PresetName::kCapacity - 1] = '\0';
+        if (AutoNumber(nm, n) && n > last) last = n;
+    }
+
+    char  out[PresetName::kCapacity] = "Save ";
+    char  digits[12];
+    int   d = 0;
+    for (uint32_t v = last + 1u; v; v /= 10u) digits[d++] = (char)('0' + v % 10u);
+    char* o = out + 5;
+    while (d) *o++ = digits[--d];
+    *o = '\0';
+    presetName->Set(out);
+}
+
+/* Save as a history, in constant time: the save point in slot 0 is copied into
+ * an empty history slot — or, once all fifteen are full, over the oldest — and
+ * the live state lands in slot 0, the boot state. Two writes, however long the
+ * history. The store's sequence counter is global, so the lowest-sequence
+ * history slot is the oldest. Records move byte-exact with their own schema
+ * hash and name. Older saves are recalled from the web programmer. */
+static bool SaveToHistory()
+{
+    static uint8_t DSY_SDRAM_BSS buf[kPresetBlobCapacity];
+    if (presets.InfoFor(0).valid)
+    {
+        uint8_t  dst    = 0;
+        uint32_t oldest = 0xFFFFFFFFu;
+        for (uint8_t i = 1; i < Presets::kNumSlots; i++)
+        {
+            const Presets::SlotInfo h = presets.InfoFor(i);
+            if (!h.valid) { dst = i; break; }        // an empty slot first
+            if (h.seq < oldest) { oldest = h.seq; dst = i; }
+        }
+        uint32_t schema = 0;
+        uint16_t total  = 0;
+        if (presets.ReadSlotBytes(0, 0, buf, sizeof(buf), &schema, &total) >= 0)
+            presets.WriteSlotRaw(dst, schema, buf, total);
+    }
+    return presets.Save(0);
+}
+
 /* Secondary ring: a level arc (dim while uncaught) plus a bright catch pip. */
 static void DrawShiftArc(uint8_t pot, float level, bool caught, uint32_t t_ms)
 {
@@ -749,11 +988,93 @@ static void DrawSecondaryRings(uint32_t t_ms)
 /* B3 press bookkeeping, written by OnPoll at 1 ms cadence and read by OnFrame /
  * OnRender. */
 static bool b1Chorded = false;   // another button joined while down → not a page press
+static bool b2Chorded = false;   // ... → not a slice
 static bool b3Chorded = false;
+
+/* B2 or B3 held alone this long is a hold, not a tap: B2 polarity flip, B3 snap. */
+static constexpr uint32_t kHoldArmMs = 100;
+static bool b2HoldArmed  = false;   // past the window: a hold, not a chord
+static bool b3HoldArmed  = false;
+static bool shiftUsed    = false;   // this B3 hold snapped a knob — the release won't page
+static bool flipHeld = false;   // armed on the Primary page — P1/P2 are direction controls
+
+/* Stored value and snap target of pot p on the visible page: its factory
+ * default, or its value in the save point when the option asks for that and
+ * slot 0 holds one. Routing reports zones. False for a disabled secondary. */
+static bool SnapTarget(uint8_t p, float& cur, float& def)
+{
+    const bool saved = options.snapToSaved && savedValid;
+    if (RoutingOpen())
+    {
+        cur = (float)routing.zone[p];
+        def = saved ? (float)savedZone[p] : 0.0f;
+        return true;
+    }
+    if (SecondaryOpen())
+    {
+        cur = secState[p].stored;
+        def = saved ? savedSec[p] : kSecDefault[p];
+        return kSecEnabled[p];
+    }
+    const uint8_t pg = pager.Page();
+    cur = pager.Stored(pg, p);
+    def = saved ? savedPage[pg][p] : kPageDefaults[pg][p];
+    return true;
+}
+
+/* Hold pot p on the visible page at v, uncaught and armed on whichever side
+ * the pot sits. Re-asserted every frame while B3 is held, after the pager has
+ * updated and before the rings render, so a catch the pager makes as the pot
+ * crosses v — or comes within kCatchTolerance of it — is undone unseen. Never a
+ * proximity catch: that lit the ring up for a frame. Routing takes a zone. */
+static void HoldValue(uint8_t p, float v, const float* ph)
+{
+    if (RoutingOpen())
+    {
+        routing.zone[p] = (uint8_t)(v + 0.5f);
+        routeCaught[p]  = false;   // the routing block won't re-catch while B3 is held
+        return;
+    }
+    const float side = (ph[p] >= v) ? 2.0f * kCatchTolerance : -2.0f * kCatchTolerance;
+    if (SecondaryOpen())
+    {
+        secState[p].stored       = v;
+        secState[p].caught       = false;
+        secState[p].sign_at_lock = (side > 0.0f) ? 1 : -1;
+        return;
+    }
+    float away[NUM_POTS];   // the pot, pushed out of proximity on its own side
+    std::memcpy(away, ph, sizeof(away));
+    if (std::fabs(ph[p] - v) < 2.0f * kCatchTolerance) away[p] = v + side;
+    pager.SetStored(pager.Page(), p, v, away);
+}
+
+/* After any preset apply or a factory reset, re-arm every catch so no pot jumps
+ * the new stored values: routing per zone, secondary if it is open (it re-arms
+ * on entry otherwise), and the B1 page held under a B3 page. Pager pages —
+ * P1/P2's flips included — re-arm themselves. */
+static void RearmAfterStateChange()
+{
+    const float* ph = loop.Phys();
+    for (uint8_t p = 0; p < NUM_POTS; p++)
+    {
+        routeCaught[p] = false;
+        if (SecondaryOpen() && kSecEnabled[p]) InitCatch(secState[p], ph[p]);
+        if (b3Active) underNorm[p] = pager.Stored(underPage, p);
+    }
+}
 
 /* Knob values → engine, routing zones → mod sources. */
 static void OnFrame()
 {
+    /* A preset landed since last frame — from the panel, boot or the
+     * programmer. Before anything below re-asserts the old values. */
+    if (stateApplied)
+    {
+        stateApplied = false;
+        RearmAfterStateChange();
+    }
+
     /* B3 view changes: arm the incoming page's catch, re-arm B1's on the way out. */
     {
         static bool    prevActive = false;
@@ -809,13 +1130,53 @@ static void OnFrame()
         prevPage   = b3Page;
     }
 
+    /* B3 held is the SHIFT layer on every page, and it is binary: each knob
+     * holds still and only toggles between where it was when the hold armed
+     * and its snap target (factory, or the save point). A nudge toward the
+     * target snaps there — depths to exactly zero — and a nudge back returns.
+     * All six knobs, P1/P2 included. Same momentum test as the gesture,
+     * re-based on each nudge. A knob is only held once its pot has moved, so
+     * untouched rings don't dim on every hold. A knob left at its default
+     * waits behind the catch pip after release. */
+    {
+        static bool  prev = false;
+        static float start  [NUM_POTS];   // pot position when the hold armed
+        static float ref    [NUM_POTS];   // pot position the nudge is measured from
+        static float orig   [NUM_POTS];   // value when the hold armed
+        static bool  atDef  [NUM_POTS];
+        static bool  touched[NUM_POTS];
+        const float* ph = loop.Phys();
+        if (b3HoldArmed)
+            for (uint8_t p = 0; p < NUM_POTS; p++)
+            {
+                float cur, def;
+                if (!SnapTarget(p, cur, def)) continue;
+                if (!prev)
+                {
+                    start[p] = ref[p] = ph[p];
+                    orig[p]    = cur;
+                    atDef[p]   = false;
+                    touched[p] = false;
+                }
+                if (std::fabs(ph[p] - start[p]) >= kCatchTolerance) touched[p] = true;
+                const float d = ph[p] - ref[p];
+                if (d <= -kGestureNudge || d >= kGestureNudge)
+                {
+                    ref[p]    = ph[p];
+                    atDef[p]  = (def - orig[p]) * d > 0.0f;   // toward the default
+                    shiftUsed = true;
+                }
+                if (touched[p]) HoldValue(p, atDef[p] ? def : orig[p], ph);
+            }
+        prev = b3HoldArmed;
+    }
+
     /* Pitch carries the same B2 gesture as Stretch. Value() is the modulated
      * speed; the gesture works in norms, and the map is linear, so convert. */
     {
-        const bool  held = hw.buttons[1].Pressed() && !hw.buttons[0].Pressed();
         const float n    = (pitch.Value() + kPitchMax) / (2.0f * kPitchMax);
         const float eff  = GestureNorm(pitchG, n, loop.Phys()[0],
-                                       held, PitchMag, PitchNormFor);
+                                       flipHeld, PitchMag, PitchNormFor);
         engine.SetSlicePitch((eff < 0.5f) ? -pitchG.liveMag : pitchG.liveMag);
     }
 
@@ -826,9 +1187,8 @@ static void OnFrame()
          * direction at a constant stretch, release and the knob is page-
          * switched until its catch pip is consumed. */
         {
-            const bool  held = hw.buttons[1].Pressed() && !hw.buttons[0].Pressed();
             const float eff  = GestureNorm(stretchG, stretch.Value(), loop.Phys()[1],
-                                           held, StretchMag, StretchNormFor);
+                                           flipHeld, StretchMag, StretchNormFor);
             engine.SetSliceStretch((eff < 0.5f) ? -stretchG.liveMag : stretchG.liveMag);
         }
         /* P3 piecewise: 0..90% of the sweep is ratio 0..4 over the envelope
@@ -850,6 +1210,19 @@ static void OnFrame()
     modRouter.SetDepth(4, cvDepth5.Value());
     modRouter.SetDepth(5, cvDepth6.Value());
 
+    /* Polarity flips land in the pager; P1/P2's rings read its catch back. */
+    for (uint8_t p = 0; p < 2; p++)
+    {
+        GestureKnob& g = p ? stretchG : pitchG;
+        if (g.commit)
+        {
+            g.commit = false;
+            pager.SetStored(0, p, g.heldNorm, loop.Phys());
+        }
+        g.view.stored = pager.Stored(0, p);
+        g.view.caught = (pager.Page() == 0) ? pager.Caught(p) : true;
+    }
+
     /* Routing view open: pots edit the stored zones with zone-granular catch —
      * a pot decouples on entry and re-locks the moment it sits inside its
      * stored zone. The pager page underneath is re-locked every frame so those
@@ -860,7 +1233,7 @@ static void OnFrame()
         for (uint8_t p = 0; p < NUM_POTS; p++)
         {
             const uint8_t z = (uint8_t)ZoneOf(ph[p]);
-            if (!routeCaught[p] && z == routing.zone[p])
+            if (!routeCaught[p] && z == EffectiveZone(routing.zone[p]) && !b3HoldArmed)
                 routeCaught[p] = true;
             if (routeCaught[p])
                 routing.zone[p] = z;
@@ -868,7 +1241,7 @@ static void OnFrame()
     }
 
     for (uint8_t p = 0; p < NUM_POTS; p++)
-        modRouter.SetSource(p, routing.zone[p]);
+        modRouter.SetSource(p, EffectiveZone(routing.zone[p]));
 
 #ifdef CAPICOLA_BENCH_LOG
     /* ~1 Hz audio-CPU + raw-CV report over USB serial (cv in milliunits, 500 ≈
@@ -898,70 +1271,104 @@ static uint32_t sliceFlashMs = 0;   // last button-originated trigger
 
 static void OnPoll(uint32_t t_ms)
 {
+    /* Slot 0 changes behind our back too (the programmer can write it), so
+     * the save-point snapshot follows its record's sequence number. */
+    {
+        static uint32_t lastSeq   = 0xFFFFFFFFu;
+        static uint32_t lastCheck = 0;
+        if (t_ms - lastCheck >= 100u)
+        {
+            lastCheck = t_ms;
+            const uint32_t seq = presets.InfoFor(0).seq;
+            if (seq != lastSeq) { lastSeq = seq; RefreshSaved(); }
+        }
+    }
+
+    const bool b1 = hw.buttons[0].Pressed();
+    const bool b2 = hw.buttons[1].Pressed();
+    const bool b3 = hw.buttons[2].Pressed();
+
     /* B1+B2 held kSaveHoldMs = save everything (all four pages) as the boot
-     * state, QSPI slot 0. Mirrors B1+B3 = reset, and leaves B2 alone to the
-     * ping-pong gesture — the two are mutually exclusive, so a save can never
-     * flip a polarity on the way past. B2's press still slices going down. */
+     * state, QSPI slot 0; the save it replaces joins the history. Not while
+     * B2 is already a hold. */
     static uint32_t saveHoldMs = 0;
-    if (hw.buttons[0].Pressed() && hw.buttons[1].Pressed()
-        && !hw.buttons[2].Pressed())
+    if (b1 && b2 && !b3 && !b2HoldArmed)
     {
         pager.ConsumeButton();   // B1 is the pager now — eat its release
         if (++saveHoldMs == kSaveHoldMs)
         {
-            presets.Save(0);
-            saveFlashMs = t_ms;   // LED confirm (see OnRender)
+            NameThisSave();
+            SaveToHistory();
+            ConfirmFlash();
         }
     }
     else
         saveHoldMs = 0;
 
-    /* B1+B3 held kResetHoldMs = reset the CURRENT view's knobs to factory
-     * defaults (routing zones, if the routing view is open; stored values
-     * only — the QSPI save is untouched). Same triple blink confirms. */
-    static uint32_t resetHoldMs = 0;
-    if (hw.buttons[0].Pressed() && hw.buttons[2].Pressed()
-        && !hw.buttons[1].Pressed())
+    /* B2+B3 held kLoadHoldMs = load the boot state back. An empty slot does
+     * nothing and doesn't blink. Not while B2 or B3 is already a hold. Secondaries
+     * reach the engine through OnFrame's push. */
+    static uint32_t loadHoldMs = 0;
+    if (b2 && b3 && !b1 && !b2HoldArmed && !b3HoldArmed)
     {
-        pager.ConsumeButton();   // B1 is the pager now — eat its release
+        if (++loadHoldMs == kLoadHoldMs && presets.HasValid(0) && presets.Load(0))
+            ConfirmFlash();   // catch re-arms on the next frame (stateApplied)
+    }
+    else
+        loadHoldMs = 0;
+
+    /* B1+B3 held kResetHoldMs = factory defaults on every page, so there is
+     * always one way home. Stored values only — the QSPI save is untouched, so
+     * B2+B3 undoes it. */
+    static uint32_t resetHoldMs = 0;
+    if (b1 && b3 && !b2 && !b3HoldArmed)
+    {
         if (++resetHoldMs == kResetHoldMs)
         {
-            if (RoutingOpen())
+            const float* ph = loop.Phys();
+            for (uint8_t p = 0; p < NUM_POTS; p++)
             {
-                for (uint8_t p = 0; p < NUM_POTS; p++)
-                {
-                    routing.zone[p] = 0;       // input follower
-                    routeCaught[p]  = false;   // re-catch against the new zone
-                }
+                for (uint8_t pg = 0; pg < 2; pg++)
+                    pager.SetStored(pg, p, kPageDefaults[pg][p], ph);
+                routing.zone[p]    = 0;                // input follower
+                secState[p].stored = kSecDefault[p];
             }
-            else if (SecondaryOpen())
-            {
-                for (uint8_t p = 0; p < NUM_POTS; p++)
-                {
-                    secState[p].stored = kSecDefault[p];
-                    secState[p].caught = false;
-                    if (kSecEnabled[p]) SecApply(p, SecValue(p, secState[p].stored));
-                }
-            }
-            else
-            {
-                const uint8_t pg = pager.Page();
-                for (uint8_t p = 0; p < NUM_POTS; p++)
-                    pager.SetStored(pg, p, kPageDefaults[pg][p], loop.Phys());
-            }
-            saveFlashMs = t_ms;   // LED confirm (see OnRender)
+            RearmAfterStateChange();
+            ConfirmFlash();
         }
     }
     else
         resetHoldMs = 0;
 
-    /* B2 = force trigger, on every press. A forced slice is a real slice, so it
-     * pulses TRIG 1 exactly like an auto-detected one. */
+    /* B2 = force trigger, on release, so a press can still become a chord or a
+     * hold. A chorded release never slices, and neither does a hold that
+     * flipped P1/P2. A forced slice is a real slice, so it pulses TRIG 1
+     * exactly like an auto-detected one. Held past kHoldArmMs alone it is the
+     * polarity flip hold, live only on the Primary page where P1/P2 are Pitch and
+     * Stretch; once armed it stays a hold until release. */
+    static uint32_t b2HoldMs = 0;
     if (hw.buttons[1].RisingEdge())
     {
-        engine.TriggerSlice();
-        trig1.Fire(t_ms);
-        sliceFlashMs = t_ms;
+        b2Chorded       = b1 || b3;
+        pitchG.nudged   = false;   // cleared here, not on release: OnFrame's
+        stretchG.nudged = false;   // decouple still has to read it
+    }
+    if (b2 && (b1 || b3))
+        b2Chorded = true;
+    if (b2 && !b2Chorded && !b2HoldArmed && ++b2HoldMs >= kHoldArmMs)
+        b2HoldArmed = true;
+    flipHeld = b2HoldArmed && b2 && !b3Active && pager.Page() == 0;
+    if (hw.buttons[1].FallingEdge())
+    {
+        if (!b2Chorded && !pitchG.nudged && !stretchG.nudged)
+        {
+            engine.TriggerSlice();
+            trig1.Fire(t_ms);
+            sliceFlashMs = t_ms;
+        }
+        b2Chorded   = false;
+        b2HoldArmed = false;
+        b2HoldMs    = 0;
     }
 
     /* TRIG IN (cv[0]) = external slice trigger, always accepted. Rising edge
@@ -981,31 +1388,44 @@ static void OnPoll(uint32_t t_ms)
             trigArmed = true;
     }
 
-    /* B3 rotates its own page group: first press opens on the remembered page,
-     * each press after that advances. A chorded press is never a page press. */
+    /* B3 rotates its own page group on release: first press opens on the
+     * remembered page, each press after that advances. A chorded press is never
+     * a page press. Held past kHoldArmMs alone it is the SHIFT layer (snap, in
+     * OnFrame); once armed it stays a hold until release, and a hold that
+     * snapped a knob doesn't page — one that didn't pages like a slow tap. */
+    static uint32_t b3HoldMs = 0;
     if (hw.buttons[2].RisingEdge())
-        b3Chorded = hw.buttons[0].Pressed() || hw.buttons[1].Pressed();
-    if (hw.buttons[2].Pressed()
-        && (hw.buttons[0].Pressed() || hw.buttons[1].Pressed()))
+    {
+        b3Chorded = b1 || b2;
+        shiftUsed = false;
+    }
+    if (b3 && (b1 || b2))
         b3Chorded = true;
+    if (b3 && !b3Chorded && !b3HoldArmed && ++b3HoldMs >= kHoldArmMs)
+        b3HoldArmed = true;
     if (hw.buttons[2].FallingEdge())
     {
-        if (!b3Chorded)
+        if (!b3Chorded && !shiftUsed)
         {
             if (b3Active) b3Page ^= 1;
             else          b3Active = true;
         }
-        b3Chorded = false;
+        b3Chorded   = false;
+        b3HoldArmed = false;
+        b3HoldMs    = 0;
     }
 
     /* B1 while a B3 page is up returns to B1's remembered page instead of
      * advancing it — the pager never sees the release. */
     if (hw.buttons[0].RisingEdge())
-        b1Chorded = hw.buttons[1].Pressed() || hw.buttons[2].Pressed();
-    if (hw.buttons[0].Pressed())
+        b1Chorded = b2 || b3;
+    if (b1)
     {
-        if (hw.buttons[1].Pressed() || hw.buttons[2].Pressed())
+        if (b2 || b3)
+        {
             b1Chorded = true;
+            pager.ConsumeButton();   // a chord, or B1 under a B2 hold: never a page press
+        }
         if (b3Active)
             pager.ConsumeButton();
     }
@@ -1015,22 +1435,53 @@ static void OnPoll(uint32_t t_ms)
         b1Chorded = false;
     }
 
+    /* Trig 1 / Env 1 direction follows the option, whoever set it — panel
+     * load, boot, or the programmer. Every output is rewritten from scratch
+     * after a change. */
+    static bool  jacksApplied = false;
+    static float written[jacks::kNumJacks] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    if (jackOpts.cvIn != jacksApplied)
+    {
+        jacksApplied = jackOpts.cvIn;
+        if (jackOpts.cvIn)
+        {
+            hw.cv_jacks[2].DisableCvOutput();   // TRIG 1 → CV 2
+            hw.cv_jacks[3].DisableCvOutput();   // ENV 1  → CV 3
+        }
+        else
+        {
+            hw.cv_jacks[2].SetVolts(0.0f);
+            hw.cv_jacks[3].SetVolts(0.0f);
+            hw.cv_jacks[2].EnableCvOutput();
+            hw.cv_jacks[3].EnableCvOutput();
+        }
+        for (float& w : written) w = -1.0f;
+    }
+
     /* TRIG 1 = every slice the engine actually took (auto-detected, B2 and TRIG
-     * IN alike); TRIG 2 = the output follower's kept transients. */
+     * IN alike); TRIG 2 = the output follower's kept transients. Which jack
+     * carries which is jacks::Route's call. */
     trig1.Follow(engine.SliceCount(),    t_ms);
     trig2.Follow(engine.OutEventCount(), t_ms);
-    trig1.Poll(t_ms, hw.cv_jacks[2]);   // panel CV2
-    trig2.Poll(t_ms, hw.cv_jacks[4]);   // panel CV3
 
-    /* in-env sits on the I²C MCP — write only on meaningful change. */
-    static float inEnvLast = -1.0f;
-    const float ie = engine.EnvNormIn() * kEnvOutVolts;
-    if (std::fabs(ie - inEnvLast) > 0.02f)
+    jacks::Signals sig;
+    sig.inTrig  = trig1.High(t_ms);
+    sig.outTrig = trig2.High(t_ms);
+    sig.inEnv   = engine.EnvNormIn();
+    sig.outEnv  = engine.EnvNormOut();
+    const jacks::Plan plan = jacks::Route(jackOpts, sig);
+
+    /* Trig 1, Env 1 and Trig 2 sit on the I²C MCP4728 — write only on a real
+     * change (a trigger edge is 5 V). Env 2 is the STM32 DAC and streams. */
+    CvJack* const out[jacks::kNumJacks] = {&hw.cv_jacks[2], &hw.cv_jacks[3],
+                                           &hw.cv_jacks[4], &hw.cv_jacks[5]};
+    for (uint8_t j = 0; j < jacks::kNumJacks; j++)
     {
-        inEnvLast = ie;
-        hw.cv_jacks[3].SetVolts(ie);                               // panel CV5
+        if (!plan.output[j]) continue;
+        if (j != jacks::kEnv2 && std::fabs(plan.volts[j] - written[j]) <= 0.02f) continue;
+        written[j] = plan.volts[j];
+        out[j]->SetVolts(plan.volts[j]);
     }
-    hw.cv_jacks[5].SetVolts(engine.EnvNormOut() * kEnvOutVolts);   // panel CV6
 }
 
 /* Always-on layer, drawn last every frame regardless of page:
@@ -1056,7 +1507,10 @@ static void OnRender(uint32_t t_ms)
     /* Routing view: repaint every ring with its zone selector. */
     if (RoutingOpen())
         for (uint8_t p = 0; p < NUM_POTS; p++)
-            DrawRouteRing(p, routing.zone[p]);
+        {
+            const uint8_t z = EffectiveZone(routing.zone[p]);
+            DrawRouteRing(p, z, std::fabs(modRouter.Signal(z)));
+        }
 
     constexpr LedPanel::Rgb kCvNeg = {255, 10, 0};    // red
 
@@ -1078,15 +1532,16 @@ static void OnRender(uint32_t t_ms)
     if (SecondaryOpen())
         DrawSecondaryRings(t_ms);
 
-    /* Settings-saved confirm: all three buttons blink DARK three times. Painted
-     * last so it overrides the normal button layer. */
+    /* Save / load / reset confirm: all three buttons flash bright white three
+     * times. Painted last so it overrides the normal button layer. */
     const uint32_t flashAge = t_ms - saveFlashMs;
     if (saveFlashMs != 0 && flashAge < kSaveFlashMs
         && ((flashAge / kSaveBlinkMs) & 1u) == 0u)
     {
-        hw.leds.SetButtonPair(0, kOff);
-        hw.leds.SetButtonPair(1, kOff);
-        hw.leds.SetButtonPair(2, kOff);
+        const LedPanel::Rgb confirm = hw.leds.ScaleGlobal(kWhite);
+        hw.leds.SetButtonPair(0, confirm);
+        hw.leds.SetButtonPair(1, confirm);
+        hw.leds.SetButtonPair(2, confirm);
     }
 }
 
@@ -1134,7 +1589,8 @@ int main(void) {
     presets.Manage(pager);
     presets.Manage(routing);     /* mod-source zones */
     presets.Manage(secondary);   /* secondary-settings norms */
-    presets.UseNames();   /* knob names ride the store → HostLink descriptor */
+    presets.Manage(options);     /* knobless settings — SHIFT snap target */
+    presetName = &presets.UseNames();   /* names ride the store; panel saves number themselves */
 
     loop.Use(pager)
         .Use(modRouter)

@@ -10,7 +10,8 @@ add_executable(capicola_tests
     capicola_tests.cpp)
 
 target_include_directories(capicola_tests PRIVATE
-    "${CMAKE_SOURCE_DIR}/lib")
+    "${CMAKE_SOURCE_DIR}/lib"
+    "${CMAKE_SOURCE_DIR}/src")   # jack_routing.h — firmware logic, no hardware
 
 target_compile_options(capicola_tests PRIVATE -Wall -Wextra)
 
